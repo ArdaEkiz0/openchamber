@@ -31,7 +31,10 @@ scheduled like one more project, with three differences:
   already run once per project, so the chats scope never discovers loops.
 - **Directory resolution.** `resolveProjectID({ directory })` maps any
   directory inside the chats root to the chats scope, after checking registered
-  projects, so an agent working in a chat schedules into chats.
+  projects, so an agent working in a chat schedules into chats. A directory
+  that is a linked Git worktree of a registered project resolves to that
+  project (`resolvePrimaryWorktreeRoot`), so a worktree session schedules for
+  the project it belongs to; anything still unmatched fails as not-found.
 
 The chats root is `OPENCHAMBER_CHATS_DIR` (default `<config root>/chats`). The
 VS Code extension has no chats, so its UI does not offer the scope.
