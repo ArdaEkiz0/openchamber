@@ -20,6 +20,9 @@ const PROJECT_CONFIG_VERSION = 1;
 export const MAX_TASK_NAME_LENGTH = 80;
 const MAX_TASK_PROMPT_LENGTH = 20_000;
 const MAX_CRON_LENGTH = 200;
+// Long enough for any real ref (`feature/some-branch`, `release/2.5`), short
+// enough that a pasted log line is not stored as a branch name.
+const MAX_BRANCH_LENGTH = 200;
 const MAX_LAST_ERROR_LENGTH = 2_000;
 
 const asNonEmptyString = (value) => {
@@ -342,6 +345,26 @@ const normalizeTaskForStorage = (value, options) => {
   if (targetSessionId && !/^[A-Za-z0-9_-]{4,128}$/.test(targetSessionId)) throw new Error('targetSessionId is invalid');
   const execution = normalizeExecution(value.execution, targetSessionId);
 
+  // Where a run happens. Unset means the project checkout on whatever it is
+  // currently on, which is what every task did before this field existed.
+  // `baseBranch` is the ref a fresh worktree starts from when isolation is on;
+  // it is kept while isolation is off so turning isolation back on does not
+  // lose the pick, and ignored by the runtime in that case (#1959).
+  // A write that omits either keeps what the task stored, so an update from a
+  // client that predates these fields cannot silently turn isolation off.
+  const runInWorktree = typeof value.runInWorktree === 'boolean'
+    ? value.runInWorktree
+    : existingTask?.runInWorktree === true;
+  const branchValue = value.baseBranch;
+  const branchCleared = branchValue === null || branchValue === '';
+  const branchSource = branchCleared
+    ? null
+    : (asNonEmptyString(branchValue) ?? asNonEmptyString(existingTask?.baseBranch));
+  const baseBranchRaw = clampLength(branchSource || '', MAX_BRANCH_LENGTH);
+  if (baseBranchRaw && /[\s\u0000-\u001f]/.test(baseBranchRaw)) {
+    throw new Error('baseBranch must be a branch name without spaces');
+  }
+
   // Loop provenance: absolute path of the `.agents/loops/*.md` file driving
   // this task, when any. Preserved on every write so the scheduler can detect
   // removed loop files across restarts. Unknown to the UI model.
@@ -362,6 +385,8 @@ const normalizeTaskForStorage = (value, options) => {
     schedule,
     execution,
     state,
+    ...(runInWorktree ? { runInWorktree: true } : {}),
+    ...(baseBranchRaw ? { baseBranch: baseBranchRaw } : {}),
     ...(loopFile ? { loopFile } : {}),
   };
   if (targetSessionId) storedTask.targetSessionId = targetSessionId;
