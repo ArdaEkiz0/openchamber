@@ -23,6 +23,7 @@ import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useGitSurfaceStatus } from '@/hooks/useGitSurfaceStatus';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { useDeviceInfo } from '@/lib/device';
@@ -38,7 +39,6 @@ import {
   isShortcutPrefixHeld,
 } from '@/lib/shortcuts';
 import { cn } from '@/lib/utils';
-import { useGitStatus } from '@/stores/useGitStore';
 import { useSourceControlAuthEntry, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 import { useRepositoryHostProvider } from '@/components/references/referenceSources';
@@ -217,7 +217,11 @@ export const ContextPanelRail: React.FC = () => {
   const changeRequestProvider = repositoryProvider === 'none' ? null : repositoryProvider;
   const { screenWidth } = useDeviceInfo();
   // The Git badge counts what the Git panel shows: for a draft waiting for a new space, the space's changes.
-  const gitStatus = useGitStatus(panelContentDirectory(useDraftSpaceTarget(), directoryKey || null));
+  // The repository is resolved the same way the Git and Changes panels resolve
+  // it, so a project root that is not itself a repository shows the count of
+  // the nested repository those panels are working in (#5268). Draft spaces
+  // resolve on their target directory, as their panel content does.
+  const gitStatus = useGitSurfaceStatus(panelContentDirectory(useDraftSpaceTarget(), directoryKey || null));
 
   const surfaceSwitchPrefix = React.useMemo(
     () => getEffectiveShortcutPrefix('switch_context_surface', shortcutOverrides),

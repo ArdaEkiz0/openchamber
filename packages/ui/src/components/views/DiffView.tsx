@@ -2877,8 +2877,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 return;
             }
 
+            // The tab belongs to the panel that shows it, not to the repository
+            // the diff came from: a nested repository under a project root is
+            // diffed here, but the editor is the panel's, keyed by its own
+            // directory. Filing the tab under the repository directory puts it
+            // under a key nothing renders (#5269).
             openContextFileAtLine(
-                effectiveDirectory,
+                panelDirectory ?? effectiveDirectory,
                 absolutePath,
                 resolvedTargetLine,
                 1,
@@ -2886,7 +2891,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         } finally {
             setOpeningEditorFilePath((current) => (current === filePath ? null : current));
         }
-    }, [activeDiffStaged, effectiveDirectory, files, git, openContextFileAtLine, setDiff]);
+    }, [activeDiffStaged, effectiveDirectory, files, git, openContextFileAtLine, panelDirectory, setDiff]);
     const handleOpenInEditor = React.useCallback((filePath: string, diffData: DiffData | null) => {
         void openFileInEditorAtChange(filePath, diffData);
     }, [openFileInEditorAtChange]);
