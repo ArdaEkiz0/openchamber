@@ -68,7 +68,10 @@ export const createScheduledTaskService = (dependencies) => {
           if (owner) return owner.id;
         }
       } catch {
-        // Not a git checkout, or git is unavailable: the directory is unknown.
+        // A throwing resolver call: fall through to the unchanged 404.
+        // resolvePrimaryWorktreeRoot itself reports the directory for a
+        // non-checkout or unavailable git, and the samePath guard above
+        // skips those, so only an unexpected throw reaches this catch.
       }
     }
     throw new OpenChamberControlError(`Project not found for directory: ${resolvedDirectory}`, 404);
