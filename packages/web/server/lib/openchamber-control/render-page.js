@@ -25,10 +25,10 @@ const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*
 // the chat prepares no more than this many per page; the two are one number on
 // purpose. A page with more renders the extras as broken images, so the tool
 // result says so and the agent can merge or split them (#5280).
-export const RENDER_PAGE_MAX_LOCAL_IMAGES = 12;
+const RENDER_PAGE_MAX_LOCAL_IMAGES = 12;
 
 /** The local image paths a page names, in order and without repeats. */
-export const renderPageLocalImages = (html) => {
+const renderPageLocalImages = (html) => {
   const sources = new Set();
   for (const match of html.matchAll(LOCAL_IMAGE_RE)) {
     sources.add(match[2] ?? match[3]);

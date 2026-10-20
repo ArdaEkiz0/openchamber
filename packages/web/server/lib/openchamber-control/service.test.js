@@ -742,6 +742,19 @@ describe('render.page', () => {
       expect(result.note).toContain('answered on the page');
     });
 
+    it('keeps the dropped-images warning next to the answer note (#5280)', async () => {
+      const { service } = createService();
+      const gallery = { html: `<div>${Array.from({ length: 19 }, (_, i) => `<img src="/repo/poster-${i}.png">`).join('')}</div>`, title: 'Gallery', awaitAnswer: true };
+      const pending = service.execute('render.page', gallery, '/repo', call);
+      await settle();
+
+      service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'First one' });
+      const result = await pending;
+
+      expect(result.note).toContain('answered on the page');
+      expect(result.note).toContain('names 19 local images');
+    });
+
     it('announces when the page starts and stops waiting', async () => {
       const onPageWaitChange = vi.fn();
       const { service } = createService({ onPageWaitChange });

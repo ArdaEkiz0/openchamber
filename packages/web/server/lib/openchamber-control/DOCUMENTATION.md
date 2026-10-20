@@ -62,7 +62,10 @@ other.
   `renderPageImageSources` lists the local images a page names by absolute
   path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP, at most 12). The
   image grant route (`../markdown-image-grants/`) allows exactly those, and the
-  chat reads them with the same rule.
+  chat reads them with the same rule. The chat prepares that list in one batch,
+  so a page naming more draws the extra images as broken; the result then says
+  how many could not be prepared and offers merging or splitting instead of
+  reporting a plain success (#5280).
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.
@@ -80,6 +83,13 @@ other.
   response as completion after dispatch. It requires observed activity or a
   newly completed assistant message.
 - Timeout and cancellation are failures, never authoritative idle results.
+- `render.page` reports the local images it could not prepare instead of raising
+  or batching the limit. The chat prepares one batch of 12 (the grant route
+  refuses more), so a page naming more draws the extras as broken images; the
+  note names how many were dropped and asks for a merged image or a split page.
+  Batching grants would multiply grant lifetimes and route calls for a page
+  shape one image already covers, and a higher cap only moves the cliff to where
+  the agent still cannot see it (#5280).
 - `returnResult` on create/send/fork hands the dispatched session's final
   answer back to the calling session (`options.contextSessionId`) through
   `../dispatch-results/`. It is checked before anything is created: it needs a
