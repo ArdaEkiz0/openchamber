@@ -371,6 +371,12 @@ describe('scheduled-task service directory resolution', () => {
     expect(resolve).toHaveBeenCalledOnce();
   });
 
+  it('resolves a plain subdirectory of a registered checkout to that project', async () => {
+    const resolve = vi.fn(async (directory) => (directory === path.resolve('/repo/docs/deep') ? { root: '/repo' } : null));
+    await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: resolve }, '/repo/docs/deep')).resolves.toBe('project-test');
+    expect(resolve).toHaveBeenCalledOnce();
+  });
+
   it('keeps the not-found behavior for unrelated repositories and non-checkouts', async () => {
     await expect(resolveProjectID({ resolvePrimaryWorktreeRoot: async () => ({ root: '/somewhere-else' }) }, '/other-repo'))
       .rejects.toMatchObject({ statusCode: 404 });
