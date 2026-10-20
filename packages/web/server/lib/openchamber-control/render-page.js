@@ -21,18 +21,25 @@ const RENDER_PAGE_MAX_ANSWER_DATA_LENGTH = 16_000;
 // A quoted path may hold spaces (macOS names screenshots that way); an
 // unquoted url() ends at the first space or parenthesis.
 const LOCAL_IMAGE_RE = /(["'`])((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>\n]*?\.(?:png|jpe?g|gif|webp))\1|url\(\s*((?:file:\/\/|\/(?!\/)|[A-Za-z]:[\\/])[^"'`<>()\s]*?\.(?:png|jpe?g|gif|webp))\s*\)/gi;
-// The image grant route prepares at most this many images in one request.
-const RENDER_PAGE_MAX_LOCAL_IMAGES = 12;
+// The image grant route prepares at most this many images in one request, and
+// the chat prepares no more than this many per page; the two are one number on
+// purpose. A page with more renders the extras as broken images, so the tool
+// result says so and the agent can merge or split them (#5280).
+export const RENDER_PAGE_MAX_LOCAL_IMAGES = 12;
 
-/** The local image paths a page names, in order, at most RENDER_PAGE_MAX_LOCAL_IMAGES. */
-export const renderPageImageSources = (html) => {
+/** The local image paths a page names, in order and without repeats. */
+export const renderPageLocalImages = (html) => {
   const sources = new Set();
   for (const match of html.matchAll(LOCAL_IMAGE_RE)) {
     sources.add(match[2] ?? match[3]);
-    if (sources.size === RENDER_PAGE_MAX_LOCAL_IMAGES) break;
   }
   return [...sources];
 };
+
+/** The local image paths a page names, in order, at most RENDER_PAGE_MAX_LOCAL_IMAGES. */
+export const renderPageImageSources = (html) => (
+  renderPageLocalImages(html).slice(0, RENDER_PAGE_MAX_LOCAL_IMAGES)
+);
 
 // A page sent without a title is named after its own <title>, else its first
 // h1 to h3, else "Page". Weaker models sent title and html in separate calls,
@@ -52,6 +59,12 @@ const renderPageTitleFromHtml = (html) => (
 const RENDER_PAGE_FALLBACK_TITLE = 'Page';
 
 const SHOWN_NOTE = "Shown to the user in the chat above your reply. Don't announce, describe or restate the page; reply with only what it doesn't already say.";
+
+// The page draws from files the server prepares ahead of time, one batch of
+// RENDER_PAGE_MAX_LOCAL_IMAGES. A page that names more renders the rest as
+// broken images, so the result says so and the agent can merge or split them
+// (#5280).
+const droppedImagesNote = (total) => `Heads-up: this page names ${total} local images and only the first ${RENDER_PAGE_MAX_LOCAL_IMAGES} could be prepared, so the other ${total - RENDER_PAGE_MAX_LOCAL_IMAGES} show as broken images. Put at most ${RENDER_PAGE_MAX_LOCAL_IMAGES} on one page: merge them into a single image, or show a subset here and offer the rest in a second page.`;
 
 const ANSWERED_NOTE = "The user answered on the page. summary is their choice in words, data is what the page sent. Continue the task from it; the chat already shows the summary under the page, so don't repeat it back.";
 
@@ -163,13 +176,21 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers }) => async (inp
   if (title.length > RENDER_PAGE_MAX_TITLE_LENGTH) {
     throw new OpenChamberControlError(`title is ${title.length} characters; the limit is ${RENDER_PAGE_MAX_TITLE_LENGTH}`, 400);
   }
+  // The chat prepares the page's local images in one batch, so a page naming
+  // more than that shows the extras as broken. Said plainly here, the agent can
+  // still fix it in the same turn instead of reporting a half-drawn gallery as
+  // done (#5280).
+  const localImageCount = renderPageLocalImages(html).length;
+  const noteSuffix = localImageCount > RENDER_PAGE_MAX_LOCAL_IMAGES
+    ? ` ${droppedImagesNote(localImageCount)}`
+    : '';
   if (input.awaitAnswer !== true) {
-    return { shown: true, title, note: SHOWN_NOTE };
+    return { shown: true, title, note: `${SHOWN_NOTE}${noteSuffix}` };
   }
   // A plugin generated before pages could wait sends no call id.
   if (!sessionId || !callId) {
     throw new OpenChamberControlError('This connection cannot wait for an answer on a page; show the page without awaitAnswer and ask in text', 400);
   }
   const answer = await pageAnswers.wait({ sessionId, callId, title, directory, signal });
-  return { title, answer, note: ANSWERED_NOTE };
+  return { title, answer, note: `${ANSWERED_NOTE}${noteSuffix}` };
 };

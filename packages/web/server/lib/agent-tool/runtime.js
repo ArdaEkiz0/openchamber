@@ -255,6 +255,7 @@ const NOTIFY_TOOL_DESCRIPTION = "Notify the user outside the chat: when long wor
 
 const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, above your reply, or ask the user to choose on one (awaitAnswer). "
   + "The page is part of your reply and sits on the chat's background: leave html, body and the outermost element without a background, add no outer card, border or banner title, and set boxes apart by tone. Style with the theme variables listed under html. "
+  + "At most 12 local images (absolute paths) can be prepared for one page; more than that show as broken images, so merge them or split the page. "
   + "Read html before writing a page and awaitAnswer before asking on one.";
 
 // A field means the same thing in every tool that declares it, so one set

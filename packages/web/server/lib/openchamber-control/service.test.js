@@ -685,6 +685,22 @@ describe('render.page', () => {
     expect(await named(page)).toBe('Page');
   });
 
+  it('tells the agent that a page names more local images than the chat prepares (#5280)', async () => {
+    const { service } = createService();
+    const gallery = (count) => `<div>${Array.from({ length: count }, (_, i) => `<img src="/repo/poster-${i}.png">`).join('')}</div>`;
+
+    const tooMany = await service.execute('render.page', { html: gallery(19), title: 'Gallery' }, '/repo');
+    expect(tooMany.note).toContain('names 19 local images');
+    expect(tooMany.note).toContain('the other 7 show as broken images');
+    expect(tooMany.note).toContain("Don't announce");
+
+    // The last image that fits is drawn, and the same path twice is one image.
+    const fits = await service.execute('render.page', { html: gallery(12), title: 'Gallery' }, '/repo');
+    expect(fits.note).not.toContain('local images');
+    const repeated = await service.execute('render.page', { html: `${gallery(12)}<img src="/repo/poster-0.png">`, title: 'Gallery' }, '/repo');
+    expect(repeated.note).not.toContain('local images');
+  });
+
   it('asks for html and title in one call when html is missing', async () => {
     const { service } = createService();
     await expect(service.execute('render.page', { title: 'Coverage' }, '/repo'))
