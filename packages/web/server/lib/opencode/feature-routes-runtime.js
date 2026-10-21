@@ -719,6 +719,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         }, { bootstrapStore: worktreeBootstrapStore });
       scheduledWorktreeBridge.isGitRepository = (projectDirectory) =>
         isGitRepositoryService(projectDirectory).catch(() => false);
+    }
     registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
     registerMagicPromptRoutes(app, {
       fsPromises,
