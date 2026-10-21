@@ -28,6 +28,7 @@ import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
+import { fillScheduledWorktreeBridge } from '../scheduled-tasks/worktree-bridge.js';
 import { createTrackedItemsService } from '../tracked-items/service.js';
 import { createProviderReadCache } from '../provider-read-cache/index.js';
 import { createTrackedItemReaders } from '../tracked-items/readers.js';
@@ -692,34 +693,15 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     // same way the routes do on delete: worktree gone, branch with it, the
     // directory's OpenCode instance released by path. The runtime was wired to
     // this bridge before the git routes existed, so the bridge is filled here.
-    if (routeDependencies.scheduledWorktreeBridge instanceof Object) {
-      const scheduledWorktreeBridge = routeDependencies.scheduledWorktreeBridge;
-      if (gitWorktreeCreation?.createWorktree instanceof Function) {
-        scheduledWorktreeBridge.create = ({ projectDirectory, baseBranch }) =>
-          gitWorktreeCreation.createWorktree(projectDirectory, {
-            mode: 'new',
-            ...(baseBranch ? { startRef: baseBranch } : {}),
-          }).then((created) => ({
-            directory: created.path,
-            branch: created.branch || null,
-            name: created.name || null,
-          }));
-      } else {
-        scheduledWorktreeBridge.create = null;
-      }
-      scheduledWorktreeBridge.remove = ({ projectDirectory, worktreeDirectory, deleteLocalBranch }) =>
-        removeWorktreeService(projectDirectory, {
-          directory: worktreeDirectory,
-          // A scheduled run keeps nothing behind on purpose: the branch was
-          // created for this run, like a finished multi-run lane's (#1959).
-          deleteLocalBranch: deleteLocalBranch !== false,
-          disposeInstance: gitWorktreeCreation?.createWorktreeInstanceDisposer instanceof Function
-            ? gitWorktreeCreation.createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
-            : undefined,
-        }, { bootstrapStore: worktreeBootstrapStore });
-      scheduledWorktreeBridge.isGitRepository = (projectDirectory) =>
-        isGitRepositoryService(projectDirectory).catch(() => false);
-    }
+    fillScheduledWorktreeBridge(routeDependencies.scheduledWorktreeBridge, {
+      createWorktree: gitWorktreeCreation?.createWorktree,
+      createWorktreeInstanceDisposer: gitWorktreeCreation?.createWorktreeInstanceDisposer,
+      removeWorktree: removeWorktreeService,
+      isGitRepository: isGitRepositoryService,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      bootstrapStore: worktreeBootstrapStore,
+    });
     registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
     registerMagicPromptRoutes(app, {
       fsPromises,

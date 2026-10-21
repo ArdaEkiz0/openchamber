@@ -620,10 +620,21 @@ export const createScheduledTasksRuntime = (deps) => {
     let isolation = null;
     if (!chatsRun && task.runInWorktree === true) {
       const create = typeof createTaskWorktree === 'function' ? createTaskWorktree : null;
-      const gitLike = typeof isGitRepository === 'function'
-        ? await isGitRepository(projectPath)
-        : null;
-      if (create && (gitLike !== null ? gitLike : true)) {
+      // A probe that throws is not a "not a git repository" answer: the run was
+      // asked to isolate, so an unknown answer fails it instead of quietly
+      // running over the checkout (#1959).
+      let gitLike = null;
+      if (typeof isGitRepository === 'function') {
+        try {
+          gitLike = await isGitRepository(projectPath);
+        } catch (error) {
+          throw new Error(`failed to check whether the project is a git repository: ${error?.message || error}`);
+        }
+      }
+      if (!create) {
+        throw new Error('failed to create isolated worktree: worktree creation is unavailable');
+      }
+      if (gitLike !== false) {
         try {
           isolation = await create({
             projectDirectory: projectPath,
@@ -636,12 +647,14 @@ export const createScheduledTasksRuntime = (deps) => {
         }
       }
       if (!isolation) {
+        // The only way to get here is a project that is not a git repository,
+        // or a creation call that answered with nothing at all.
         logger.warn?.('[ScheduledTasks] isolated run fell back to the project directory', {
           projectID,
           taskID: task.id,
           reason: gitLike === false
             ? 'project is not a git repository'
-            : (create ? 'worktree creation returned no worktree (bridge not ready)' : 'worktree creation unavailable'),
+            : 'worktree creation returned no worktree',
         });
       }
     }
