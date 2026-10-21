@@ -186,9 +186,12 @@ checkout itself:
   as passing `false`.
 - **Execution.** The runtime creates the worktree through the same creation
   path the editor and multi-run use (the `scheduledWorktreeBridge` filled in by
-  `lib/git` registration), opens the run's session inside it, and records the
-  start ref. Isolation failure is a run error, never a silent in-directory
-  fallback: a git project asking for isolation either runs isolated or fails.
+  `lib/git` registration) and opens the run's session inside it. What it records
+  is the branch the run actually used — the `openchamber/<name>` branch made for
+  this run, not the picked start ref. Isolation failure is a run error, never a
+  silent in-directory fallback: a git project asking for isolation either runs
+  isolated or fails. Before the git routes register, the bridge answers with a
+  failure, so a run in that window fails as well.
 - **Teardown.** When the run's prompt/command finishes, the worktree and its
   branch are removed (branch delete included); the run's session record
   outlives the worktree and stays readable, but continuing that finished

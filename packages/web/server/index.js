@@ -96,6 +96,7 @@ import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
+import { createUnregisteredScheduledWorktreeBridge } from './lib/scheduled-tasks/worktree-bridge.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
@@ -1616,18 +1617,30 @@ const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
 // Isolated scheduled runs (#1959). The scheduled runtime exists before the git
 // routes are registered, so the actions it needs read through this bridge,
 // which the git routes registration fills once it is up.
-const scheduledWorktreeBridge = {};
+const scheduledWorktreeBridge = createUnregisteredScheduledWorktreeBridge();
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
   chatsScope: scheduledChatsScope,
   messageQueueRuntime,
   resolvePrimaryWorktreeRoot,
   isSessionArchived: (sessionID) => openChamberSessionService.archiveStore.isArchived(sessionID),
-  createTaskWorktree: (input) => scheduledWorktreeBridge.create?.(input),
-  removeTaskWorktree: (input) => scheduledWorktreeBridge.remove?.(input),
-  // null when the routes are not registered yet; the runtime treats that as
-  // "not a repository" and falls back to the in-directory run.
-  isGitRepository: (projectDirectory) => scheduledWorktreeBridge.isGitRepository?.(projectDirectory) ?? null,
+  createTaskWorktree: (input) => {
+    const create = scheduledWorktreeBridge.create;
+    if (typeof create !== 'function') {
+      return Promise.reject(new Error('worktree creation is unavailable'));
+    }
+    return create(input);
+  },
+  removeTaskWorktree: (input) => {
+    const remove = scheduledWorktreeBridge.remove;
+    return typeof remove === 'function' ? remove(input) : Promise.resolve();
+  },
+  isGitRepository: (projectDirectory) => {
+    const probe = scheduledWorktreeBridge.isGitRepository;
+    // An unregistered bridge cannot answer; the run then fails at creation
+    // instead of being told the folder is not a repository.
+    return typeof probe === 'function' ? probe(projectDirectory) : true;
+  },
   readSessionDefaults: async (projectID) => {
     const settings = await readSettingsFromDiskMigrated();
     const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.id === projectID) ?? null;

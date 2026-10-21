@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { fillScheduledWorktreeBridge } from './worktree-bridge.js';
+import { createUnregisteredScheduledWorktreeBridge, fillScheduledWorktreeBridge } from './worktree-bridge.js';
 
 const dependencies = (overrides = {}) => ({
   createWorktree: vi.fn(async () => ({ path: '/repo/.worktrees/scheduled-run-1', branch: 'openchamber/run', name: 'scheduled-run-1' })),
@@ -11,6 +11,25 @@ const dependencies = (overrides = {}) => ({
   getOpenCodeAuthHeaders: () => ({ authorization: 'Bearer token' }),
   bootstrapStore: { store: true },
   ...overrides,
+});
+
+describe('scheduled task worktree bridge before the git routes register', () => {
+  it('refuses to create with a reason a run can report', async () => {
+    const bridge = createUnregisteredScheduledWorktreeBridge();
+
+    // An empty answer here would read as "not a git repository" and let the
+    // run quietly use the checkout (#1959).
+    await expect(bridge.create({ projectDirectory: '/repo' })).rejects.toThrow('worktree bridge not registered yet');
+  });
+
+  it('has nothing to remove and claims nothing about the folder', async () => {
+    const bridge = createUnregisteredScheduledWorktreeBridge();
+
+    await expect(bridge.remove({ projectDirectory: '/repo', worktreeDirectory: '/repo/.worktrees/x' })).resolves.toBeUndefined();
+    // "true" sends the run to creation, where the refusal above is the answer
+    // it gets — not a misleading "not a repository".
+    expect(bridge.isGitRepository('/repo')).toBe(true);
+  });
 });
 
 describe('scheduled task worktree bridge', () => {

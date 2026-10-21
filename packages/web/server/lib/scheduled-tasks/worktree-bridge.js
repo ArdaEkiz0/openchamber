@@ -12,6 +12,21 @@
  * without building the whole route surface: a missing brace there once broke
  * the server's parse, and no test covered this wiring.
  */
+/**
+ * The bridge as it stands before the git routes register.
+ *
+ * Creation fails with a reason instead of returning nothing: a run that lands
+ * in the boot window is told so, rather than being handed an empty answer that
+ * reads as "not a git repository" and runs over the checkout (#1959). Removal
+ * is a no-op because nothing was created, and the probe says "git" so the run
+ * reaches creation and gets that reason.
+ */
+export const createUnregisteredScheduledWorktreeBridge = () => ({
+  create: () => Promise.reject(new Error('worktree bridge not registered yet')),
+  remove: () => Promise.resolve(),
+  isGitRepository: () => true,
+});
+
 export const fillScheduledWorktreeBridge = (bridge, dependencies) => {
   if (!(bridge instanceof Object)) {
     return bridge;
