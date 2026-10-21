@@ -639,9 +639,9 @@ export const createScheduledTasksRuntime = (deps) => {
         logger.warn?.('[ScheduledTasks] isolated run fell back to the project directory', {
           projectID,
           taskID: task.id,
-          reason: typeof createTaskWorktree !== 'function'
-            ? 'worktree creation unavailable'
-            : 'project is not a git repository',
+          reason: gitLike === false
+            ? 'project is not a git repository'
+            : (create ? 'worktree creation returned no worktree (bridge not ready)' : 'worktree creation unavailable'),
         });
       }
     }
@@ -681,7 +681,10 @@ export const createScheduledTasksRuntime = (deps) => {
         await chatsScope.discardChatDirectory(directory);
       }
       if (isolation) {
-        await removeTaskWorktree?.({ projectDirectory: projectPath, worktreeDirectory: isolation.directory })
+        // The branch exists only because this run asked for it, so it goes
+        // with the worktree here the same way the finished run's teardown
+        // removes it.
+        await removeTaskWorktree?.({ projectDirectory: projectPath, worktreeDirectory: isolation.directory, deleteLocalBranch: true })
           .catch(() => {});
       }
       throw error;

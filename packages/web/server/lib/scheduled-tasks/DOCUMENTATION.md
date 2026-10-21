@@ -175,18 +175,22 @@ checkout itself:
   user-set field; writes that omit them keep the stored choice, so an editor
   save with the switch off persists an explicit `false` and keeps `baseBranch`
   (turning isolation back on restores the branch without re-picking it).
-- **Gate.** A base branch must be a branch name without spaces
-  (`baseBranch must be a branch name without spaces`); the field is dropped and
-  logged otherwise. `runInWorktree` is honored only when the project path is a
-  git repository — a non-git project falls back to in-directory execution and
-  reports `isolated: false`, the same as passing `false`.
+- **Gate.** Storing a `baseBranch` containing whitespace is rejected outright
+  (`baseBranch must be a branch name without spaces`); a stored value that is
+  not a string is dropped silently when the run reads it. `runInWorktree` is
+  honored only when the project path is a git repository — a non-git project
+  falls back to in-directory execution and reports `isolated: false`, the same
+  as passing `false`.
 - **Execution.** The runtime creates the worktree through the same creation
   path the editor and multi-run use (the `scheduledWorktreeBridge` filled in by
   `lib/git` registration), opens the run's session inside it, and records the
   start ref. Isolation failure is a run error, never a silent in-directory
   fallback: a git project asking for isolation either runs isolated or fails.
-- **Teardown.** When the run's session ends, the worktree and its branch are
-  removed (branch delete included); a teardown failure is logged and never
+- **Teardown.** When the run's prompt/command finishes, the worktree and its
+  branch are removed (branch delete included); the run's session record
+  outlives the worktree and stays readable, but continuing that finished
+  session answers 404 (OpenCode 2.x behavior for a deleted directory). A
+  teardown failure is logged and never
   overrides the run's own result.
 - **State.** `state.lastRunIsolated` and `state.lastRunBranch` mirror what the
   last run actually did; the `openchamber:scheduled-task-ran` event payload
