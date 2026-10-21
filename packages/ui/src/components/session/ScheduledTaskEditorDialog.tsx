@@ -462,6 +462,10 @@ const isSameCalendarDay = (a: Date, b: Date) => (
   && a.getDate() === b.getDate()
 );
 
+// Select needs a value for "no branch picked"; the draft keeps '' so the run
+// starts from HEAD and the sentinel never reaches the saved task.
+const WORKTREE_HEAD_VALUE = '__worktreeHead';
+
 const CronScheduleSection: React.FC<{
   draft: ScheduledTaskDraft;
   setDraft: React.Dispatch<React.SetStateAction<ScheduledTaskDraft>>;
@@ -1465,16 +1469,24 @@ export function ScheduledTaskEditorDialog(props: {
               <div className="flex flex-col gap-1">
                 <FieldLabel>{t('sessions.scheduledTasks.editor.worktree.baseBranch.label')}</FieldLabel>
                 <Select
-                  value={draft.baseBranch.trim() || '__worktreeHead'}
+                  value={draft.baseBranch.trim() || WORKTREE_HEAD_VALUE}
                   disabled={!draft.runInWorktree || worktreeProbe.status !== 'ready'}
                   onValueChange={(value) => setDraft((prev) => ({
                     ...prev,
-                    baseBranch: value === '__worktreeHead' ? '' : value,
+                    baseBranch: value === WORKTREE_HEAD_VALUE ? '' : value,
                   }))}
                 >
-                  <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-fit max-w-full">
+                    {/* The sentinel is an internal value; the trigger shows the
+                        same words the matching item does. */}
+                    <SelectValue>
+                      {(value) => (value === WORKTREE_HEAD_VALUE
+                        ? t('sessions.scheduledTasks.editor.worktree.baseBranch.default')
+                        : value)}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__worktreeHead">{t('sessions.scheduledTasks.editor.worktree.baseBranch.default')}</SelectItem>
+                    <SelectItem value={WORKTREE_HEAD_VALUE}>{t('sessions.scheduledTasks.editor.worktree.baseBranch.default')}</SelectItem>
                     {(() => {
                       const stored = draft.baseBranch.trim();
                       const list = worktreeProbe.status === 'ready' ? worktreeProbe.branches : [];
