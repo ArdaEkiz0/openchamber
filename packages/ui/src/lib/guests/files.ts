@@ -84,7 +84,17 @@ export const guestFileOperation = async (
 ): Promise<GuestFileProxyResult> => {
   const headers = new Headers({ 'Content-Type': 'application/json' });
   if (directory) {
-    headers.set('x-opencode-directory', directory);
+    // A header value is Latin-1 only: a project path outside it (a folder with
+    // Chinese characters, say) makes fetch throw before the request leaves,
+    // and the guest is told HOST_REJECTED for a file it is allowed to read
+    // (#5179). Such a path travels percent-encoded, with the header that says
+    // so; the server decodes it back with safeDecodeMarkedURIComponent.
+    if (/[^\x00-\xFF]/.test(directory)) {
+      headers.set('x-opencode-directory', encodeURIComponent(directory));
+      headers.set('x-opencode-directory-encoding', 'uri');
+    } else {
+      headers.set('x-opencode-directory', directory);
+    }
   }
   try {
     const response = await runtimeFetch(`/api/guests/${guestId}/files`, {
