@@ -172,9 +172,12 @@ checkout itself:
   anyway: reuse dispatches through the target-session path, which returns
   before isolation is ever consulted.
 - **Storage.** Both live on the task in the project config like every other
-  user-set field; writes that omit them keep the stored choice, so an editor
-  save with the switch off persists an explicit `false` and keeps `baseBranch`
-  (turning isolation back on restores the branch without re-picking it).
+  user-set field, and both are written only when set: the switch is stored as
+  `runInWorktree: true` and dropped when off (which reads as off), and an empty
+  branch is dropped too, so an empty value means "start from `HEAD`". A write
+  that omits either keeps the stored choice. The editor sends the branch even
+  while the switch is off, so turning isolation back on restores it without
+  re-picking.
 - **Gate.** Storing a `baseBranch` containing whitespace is rejected outright
   (`baseBranch must be a branch name without spaces`); a stored value that is
   not a string is dropped silently when the run reads it. `runInWorktree` is
