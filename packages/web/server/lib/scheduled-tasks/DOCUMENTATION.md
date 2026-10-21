@@ -29,9 +29,12 @@ scheduled like one more project, with three differences:
   open the new chat.
 - **No loop files.** The chats root is not a repository. User-scope loops
   already run once per project, so the chats scope never discovers loops.
-- **Directory resolution.** `resolveProjectID({ directory })` maps any
-  directory inside the chats root to the chats scope, after checking registered
-  projects, so an agent working in a chat schedules into chats.
+- **Directory resolution.** `resolveProjectID({ directory })` answers, in
+  order: an exact registered project root, else the project that owns the
+  directory — a linked worktree of a project, or any subdirectory inside one,
+  resolved through the same `resolvePrimaryWorktreeRoot` helper the git routes
+  and existing-session validation use (#5164) — else the chats scope for a
+  directory inside the chats root, else `404 Project not found for directory`.
 
 The chats root is `OPENCHAMBER_CHATS_DIR` (default `<config root>/chats`). The
 VS Code extension has no chats, so its UI does not offer the scope.

@@ -19,9 +19,12 @@ export const createScheduledTaskService = (dependencies) => {
     resolvePrimaryWorktreeRoot = null,
   } = dependencies;
 
-  // The owning project of a linked worktree, or null for anything else. The
-  // resolver walks git's own metadata, so it answers null rather than throwing
-  // for a directory that is not a worktree.
+  // The owning project of a directory inside a checkout, or nothing when that
+  // owner is not registered. The resolver maps any directory to its
+  // repository's primary worktree root — a linked worktree, a plain
+  // subdirectory, even the project root itself — and answers
+  // `{ root: the directory }` when git cannot speak for it, so a directory
+  // outside any repository finds no project rather than raising.
   const resolveOwningProjectRoot = async (directory) => {
     if (typeof resolvePrimaryWorktreeRoot !== 'function') return null;
     try {

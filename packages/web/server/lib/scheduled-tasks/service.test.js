@@ -339,18 +339,31 @@ describe('scheduled-task service chats scope', () => {
     await expect(service.resolveProjectID({ projectId: 'project-test' })).resolves.toBe('project-test');
   });
 
-  it('keeps the not-found answer when the ownership lookup fails or answers nothing', async () => {
+  it('resolves a plain subdirectory of a project to that project', async () => {
+    // The real dependency answers `{ root: <repository primary root> }` for any
+    // directory inside a checkout, not only for a worktree, so a subdirectory
+    // of the project resolves to it the same way `ownsDirectory` already
+    // treats it as owned.
+    const resolvePrimaryWorktreeRoot = vi.fn(async () => ({ root: path.resolve('/repo') }));
+    const { service } = createService({ chatsScope, resolvePrimaryWorktreeRoot });
+
+    await expect(service.resolveProjectID({ directory: path.resolve('/repo/src') })).resolves.toBe('project-test');
+  });
+
+  it('keeps the not-found answer for a directory outside any repository, or when the lookup fails', async () => {
+    // For a directory git cannot speak for, the dependency answers
+    // `{ root: <that directory> }` — not null — and that names no project.
+    const outside = createService({
+      chatsScope,
+      resolvePrimaryWorktreeRoot: async (directory) => ({ root: directory }),
+    }).service;
+    await expect(outside.resolveProjectID({ directory: path.resolve('/elsewhere') })).rejects.toMatchObject({ statusCode: 404 });
+
     const throwing = createService({
       chatsScope,
       resolvePrimaryWorktreeRoot: async () => { throw new Error('git unavailable'); },
     }).service;
     await expect(throwing.resolveProjectID({ directory: '/repo/.worktrees/run-1' })).rejects.toMatchObject({ statusCode: 404 });
-
-    const empty = createService({
-      chatsScope,
-      resolvePrimaryWorktreeRoot: async () => null,
-    }).service;
-    await expect(empty.resolveProjectID({ directory: '/repo/.worktrees/run-1' })).rejects.toMatchObject({ statusCode: 404 });
   });
 
   it('rejects the chats id when the server has no chats scope', async () => {
