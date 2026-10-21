@@ -27,6 +27,7 @@ const createService = (overrides = {}) => {
     projectConfigRuntime,
     scheduledTasksRuntime,
     chatsScope: overrides.chatsScope ?? null,
+    resolvePrimaryWorktreeRoot: overrides.resolvePrimaryWorktreeRoot ?? null,
   });
   return { service, projectConfigRuntime, scheduledTasksRuntime };
 };
@@ -318,6 +319,38 @@ describe('scheduled-task service chats scope', () => {
     await expect(service.resolveProjectID({ directory: `${chatsScope.root}/2026-09-30/session-a` })).resolves.toBe(chatsScope.id);
     await expect(service.resolveProjectID({ directory: '/repo' })).resolves.toBe('project-test');
     await expect(service.resolveProjectID({ directory: `${chatsScope.root}-other/session-a` })).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('resolves a linked worktree directory to the project that owns it (#5164)', async () => {
+    // The service hands the resolver a resolved absolute path, so the test
+    // fixture has to speak the platform's separator too.
+    const worktree = path.resolve('/repo/.worktrees/run-1');
+    const resolvePrimaryWorktreeRoot = vi.fn(async (directory) => (
+      directory === worktree || directory.startsWith(`${worktree}${path.sep}`) ? { root: path.resolve('/repo') } : null
+    ));
+    const { service } = createService({ chatsScope, resolvePrimaryWorktreeRoot });
+
+    // The worktree is not a registered project root; its owner is.
+    await expect(service.resolveProjectID({ directory: worktree })).resolves.toBe('project-test');
+    await expect(service.resolveProjectID({ directory: path.join(worktree, 'src') })).resolves.toBe('project-test');
+    // A directory nobody owns keeps the old not-found answer.
+    await expect(service.resolveProjectID({ directory: path.resolve('/elsewhere') })).rejects.toMatchObject({ statusCode: 404 });
+    // An explicit project still wins over any resolution.
+    await expect(service.resolveProjectID({ projectId: 'project-test' })).resolves.toBe('project-test');
+  });
+
+  it('keeps the not-found answer when the ownership lookup fails or answers nothing', async () => {
+    const throwing = createService({
+      chatsScope,
+      resolvePrimaryWorktreeRoot: async () => { throw new Error('git unavailable'); },
+    }).service;
+    await expect(throwing.resolveProjectID({ directory: '/repo/.worktrees/run-1' })).rejects.toMatchObject({ statusCode: 404 });
+
+    const empty = createService({
+      chatsScope,
+      resolvePrimaryWorktreeRoot: async () => null,
+    }).service;
+    await expect(empty.resolveProjectID({ directory: '/repo/.worktrees/run-1' })).rejects.toMatchObject({ statusCode: 404 });
   });
 
   it('rejects the chats id when the server has no chats scope', async () => {

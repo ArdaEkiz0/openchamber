@@ -16,7 +16,21 @@ export const createScheduledTaskService = (dependencies) => {
     projectConfigRuntime,
     scheduledTasksRuntime,
     chatsScope = null,
+    resolvePrimaryWorktreeRoot = null,
   } = dependencies;
+
+  // The owning project of a linked worktree, or null for anything else. The
+  // resolver walks git's own metadata, so it answers null rather than throwing
+  // for a directory that is not a worktree.
+  const resolveOwningProjectRoot = async (directory) => {
+    if (typeof resolvePrimaryWorktreeRoot !== 'function') return null;
+    try {
+      const owner = await resolvePrimaryWorktreeRoot(directory);
+      return owner?.root || null;
+    } catch {
+      return null;
+    }
+  };
 
   const listProjects = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -50,6 +64,15 @@ export const createScheduledTaskService = (dependencies) => {
     const projects = await listProjects();
     const project = projects.find((entry) => path.resolve(entry.path) === resolvedDirectory);
     if (project) return project.id;
+    // An agent working in a linked worktree is still working in the project
+    // that owns it, so the task it schedules belongs there (#5164). A worktree
+    // is never a project root of its own, which is why the path match above
+    // cannot answer this.
+    const owningRoot = await resolveOwningProjectRoot(resolvedDirectory);
+    if (owningRoot) {
+      const owning = projects.find((entry) => path.resolve(entry.path) === path.resolve(owningRoot));
+      if (owning) return owning.id;
+    }
     // An agent working in a chat schedules into the chats scope.
     if (chatsScope?.contains(resolvedDirectory)) return chatsScope.id;
     throw new OpenChamberControlError(`Project not found for directory: ${resolvedDirectory}`, 404);

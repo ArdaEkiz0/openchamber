@@ -1715,6 +1715,9 @@ const scheduledTaskService = createScheduledTaskService({
   projectConfigRuntime,
   scheduledTasksRuntime,
   chatsScope: scheduledChatsScope,
+  // An agent calling the scheduler from a linked worktree schedules into the
+  // project that owns that worktree (#5164).
+  resolvePrimaryWorktreeRoot,
 });
 const openChamberSessionService = createOpenChamberSessionService({
   readSettingsFromDiskMigrated,
