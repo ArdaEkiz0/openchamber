@@ -2,6 +2,7 @@ import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { chooseAutoNestedRepo } from '@/lib/nestedRepositories';
 import {
   useEffectiveGitDirectory,
   useGitStore,
@@ -114,8 +115,12 @@ export const useNestedGitDirectory = (
     const candidates = staleClearedSelections
       ? nestedRepos.filter((repository) => !staleClearedSelections.has(repository))
       : nestedRepos;
-    if (candidates.length === 0) return;
-    selectNestedRepo(root, candidates[0]);
+    // A repository hidden inside a dot-directory is tooling that carries a
+    // `.git` (`~/.oh-my-zsh`), so it stays in the picker but is never the
+    // automatic pick (#5357).
+    const autoSelected = chooseAutoNestedRepo(root, candidates);
+    if (!autoSelected) return;
+    selectNestedRepo(root, autoSelected);
   }, [
     enabled,
     nestedRepos,
