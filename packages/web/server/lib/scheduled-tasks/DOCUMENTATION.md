@@ -159,6 +159,39 @@ reaches it on its next run without editing it. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
 
+## Worktree isolation (project scope)
+
+A project-scope task may run in a fresh worktree of the project instead of the
+checkout itself:
+
+- **Fields.** `runInWorktree: true` asks every run to isolate; `baseBranch`
+  names the ref the worktree starts from. An empty/absent base branch starts
+  from the current `HEAD`. The pair is a project scope property: chats-scope
+  tasks never carry the fields, and the editor's save omits them for an
+  existing-session target. The fields are inert on an existing-session task
+  anyway: reuse dispatches through the target-session path, which returns
+  before isolation is ever consulted.
+- **Storage.** Both live on the task in the project config like every other
+  user-set field; writes that omit them keep the stored choice, so an editor
+  save with the switch off persists an explicit `false` and keeps `baseBranch`
+  (turning isolation back on restores the branch without re-picking it).
+- **Gate.** A base branch must be a branch name without spaces
+  (`baseBranch must be a branch name without spaces`); the field is dropped and
+  logged otherwise. `runInWorktree` is honored only when the project path is a
+  git repository — a non-git project falls back to in-directory execution and
+  reports `isolated: false`, the same as passing `false`.
+- **Execution.** The runtime creates the worktree through the same creation
+  path the editor and multi-run use (the `scheduledWorktreeBridge` filled in by
+  `lib/git` registration), opens the run's session inside it, and records the
+  start ref. Isolation failure is a run error, never a silent in-directory
+  fallback: a git project asking for isolation either runs isolated or fails.
+- **Teardown.** When the run's session ends, the worktree and its branch are
+  removed (branch delete included); a teardown failure is logged and never
+  overrides the run's own result.
+- **State.** `state.lastRunIsolated` and `state.lastRunBranch` mirror what the
+  last run actually did; the `openchamber:scheduled-task-ran` event payload
+  carries the same `isolated` / `branch` pair.
+
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`
@@ -211,8 +244,8 @@ Field mapping (model: `packages/ui/src/lib/scheduledTasksApi.ts`):
 `thinking_level` and `goalEnabled`/`goalTokenBudget` are not part of the portable
 format (UI/JSON-only today); `daily`/`weekly`/`once` schedules remain UI/JSON-only.
 Runtime state (`lastRunAt`, `nextRunAt`, `lastStatus`, `lastError`, `lastSessionId`,
-`lastDurationMs`) is never written to the markdown file — it continues to live in
-the project config state store.
+`lastDurationMs`, `lastRunIsolated`, `lastRunBranch`) is never written to the markdown file —
+it continues to live in the project config state store.
 
 ## Loop reconciliation rules
 

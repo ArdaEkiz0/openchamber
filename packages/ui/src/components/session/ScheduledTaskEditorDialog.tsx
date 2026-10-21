@@ -20,9 +20,19 @@ import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '@/component
 import { Icon } from "@/components/icon/Icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { fetchEligibleScheduledTaskTargets } from '@/lib/scheduledTasksApi';
+import { checkIsGitRepository, getGitBranches } from '@/lib/gitApi';
+// Draft shape and payload building live in scheduledTaskEditorDraft.ts so they
+// can be unit-tested without mounting the dialog.
+import {
+  buildScheduledTaskPayload,
+  toDraft,
+  validateDraft,
+  type ScheduledTaskDraft,
+} from './scheduledTaskEditorDraft';
 import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
@@ -51,14 +61,6 @@ const TIMEZONE_OPTIONS = (() => {
     'Asia/Tokyo',
   ];
 })();
-
-const getLocalDateISO = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
 
 const parseISODateToLocal = (value: string): Date | null => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -460,185 +462,6 @@ const isSameCalendarDay = (a: Date, b: Date) => (
   && a.getDate() === b.getDate()
 );
 
-type ScheduledTaskDraft = {
-  id?: string;
-  sessionMode: 'new' | 'existing';
-  targetSessionId: string;
-  name: string;
-  enabled: boolean;
-  schedule: {
-    kind: 'daily' | 'weekly' | 'once' | 'cron';
-    times: string[];
-    onceDate: string;
-    onceTime: string;
-    weekdays: number[];
-    timezone: string;
-    cronExpression: string;
-  };
-  execution: {
-    prompt: string;
-    providerID: string;
-    modelID: string;
-    variant: string;
-    agent: string;
-    /** Model, thinking level and agent follow the session defaults at run time. */
-    useDefaults: boolean;
-    goalEnabled: boolean;
-    goalTokenBudget: number | null;
-    permissionAutoAccept: boolean;
-  };
-  state?: ScheduledTask['state'];
-};
-
-const normalizeDraftTimes = (task: ScheduledTask | null): string[] => {
-  if (!task) {
-    return ['09:00'];
-  }
-  const candidates = Array.isArray(task.schedule.times)
-    ? task.schedule.times
-    : (task.schedule.time ? [task.schedule.time] : []);
-
-  const valid = candidates
-    .filter((value) => typeof value === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value))
-    .map((value) => value.trim());
-
-  const unique = Array.from(new Set(valid)).sort((a, b) => a.localeCompare(b));
-  return unique.length > 0 ? unique : ['09:00'];
-};
-
-const toDraft = (
-  task: ScheduledTask | null,
-  defaults: {
-    providerID: string;
-    modelID: string;
-    variant: string;
-    agent: string;
-  },
-): ScheduledTaskDraft => {
-  const timezoneFallback = canonicalizeTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
-  if (!task) {
-    return {
-      name: '',
-      sessionMode: 'new',
-      targetSessionId: '',
-      enabled: true,
-      schedule: {
-        kind: 'daily',
-        times: ['09:00'],
-        onceDate: getLocalDateISO(),
-        onceTime: '09:00',
-        weekdays: [1],
-        timezone: timezoneFallback,
-        cronExpression: '',
-      },
-      execution: {
-        prompt: '',
-        providerID: defaults.providerID,
-        modelID: defaults.modelID,
-        variant: defaults.variant,
-        agent: defaults.agent,
-        useDefaults: false,
-        goalEnabled: false,
-        goalTokenBudget: null,
-        permissionAutoAccept: false,
-      },
-    };
-  }
-
-  return {
-    id: task.id,
-    sessionMode: task.targetSessionId ? 'existing' : 'new',
-    targetSessionId: task.targetSessionId || '',
-    name: task.name,
-    enabled: task.enabled,
-    schedule: {
-      kind: task.schedule.kind === 'cron'
-        ? 'cron'
-        : (task.schedule.kind === 'once'
-          ? 'once'
-          : (task.schedule.kind === 'weekly' ? 'weekly' : 'daily')),
-      times: normalizeDraftTimes(task),
-      onceDate: typeof task.schedule.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.schedule.date)
-        ? task.schedule.date
-        : getLocalDateISO(),
-      onceTime: typeof task.schedule.time === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(task.schedule.time)
-        ? task.schedule.time
-        : '09:00',
-      weekdays: Array.isArray(task.schedule.weekdays) ? task.schedule.weekdays : [1],
-      timezone: canonicalizeTimezone(task.schedule.timezone || timezoneFallback),
-      cronExpression: task.schedule.kind === 'cron' && typeof task.schedule.cron === 'string'
-        ? task.schedule.cron
-        : '',
-    },
-    execution: {
-      prompt: task.execution.prompt,
-      // A task that followed the defaults may store no model; the picker then
-      // starts from the current defaults if it is pinned again.
-      providerID: task.execution.providerID || defaults.providerID,
-      modelID: task.execution.modelID || defaults.modelID,
-      variant: task.execution.variant || '',
-      agent: task.execution.agent || '',
-      useDefaults: task.execution.useDefaults === true,
-      goalEnabled: task.execution.goalEnabled === true,
-      goalTokenBudget: typeof task.execution.goalTokenBudget === 'number' && task.execution.goalTokenBudget > 0
-        ? task.execution.goalTokenBudget
-        : null,
-      permissionAutoAccept: task.execution.permissionAutoAccept === true,
-    },
-    state: task.state,
-  };
-};
-
-const validateDraft = (draft: ScheduledTaskDraft, t: ReturnType<typeof useI18n>['t']): string | null => {
-  if (draft.sessionMode === 'existing' && !draft.targetSessionId) return t('sessions.scheduledTasks.editor.targetRequired');
-  if (!draft.name.trim()) {
-    return t('sessions.scheduledTasks.editor.validation.taskNameRequired');
-  }
-  if (!draft.execution.prompt.trim()) {
-    return t('sessions.scheduledTasks.editor.validation.promptRequired');
-  }
-  if (!draft.execution.useDefaults && (!draft.execution.providerID.trim() || !draft.execution.modelID.trim())) {
-    return t('sessions.scheduledTasks.editor.validation.modelRequired');
-  }
-
-  if (draft.schedule.kind === 'once') {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.schedule.onceDate)) {
-      return t('sessions.scheduledTasks.editor.validation.dateFormat');
-    }
-    if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(draft.schedule.onceTime)) {
-      return t('sessions.scheduledTasks.editor.validation.timeFormat');
-    }
-  } else if (draft.schedule.kind === 'cron') {
-    if (!draft.schedule.cronExpression.trim()) {
-      return t('sessions.scheduledTasks.editor.validation.cronRequired');
-    }
-    const cronResult = isValidCronExpression(draft.schedule.cronExpression);
-    if (!cronResult.valid) {
-      return t('sessions.scheduledTasks.editor.validation.cronInvalid');
-    }
-  } else {
-    const validTimes = draft.schedule.times.filter((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
-    if (validTimes.length === 0) {
-      return t('sessions.scheduledTasks.editor.validation.atLeastOneTime');
-    }
-  }
-
-  if (draft.schedule.kind === 'weekly' && draft.schedule.weekdays.length === 0) {
-    return t('sessions.scheduledTasks.editor.validation.atLeastOneWeekday');
-  }
-
-  if (!draft.schedule.timezone.trim()) {
-    return t('sessions.scheduledTasks.editor.validation.timezoneRequired');
-  }
-
-  return null;
-};
-
-const dedupeSortTimes = (times: string[]) => {
-  const filtered = times.filter((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
-  return Array.from(new Set(filtered)).sort((a, b) => a.localeCompare(b));
-};
-
 const CronScheduleSection: React.FC<{
   draft: ScheduledTaskDraft;
   setDraft: React.Dispatch<React.SetStateAction<ScheduledTaskDraft>>;
@@ -810,6 +633,49 @@ export function ScheduledTaskEditorDialog(props: {
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const weekStartPreference = useUIStore((state) => state.weekStartPreference);
   const isMobile = useUIStore((state) => state.isMobile);
+  // The worktree switch only makes sense for a project path the run can branch
+  // from, so the section is driven by a probe of the chosen project.
+  const projectPath = useProjectsStore((state) => state.projects.find((entry) => entry.id === props.projectId)?.path ?? null);
+  const [worktreeProbe, setWorktreeProbe] = React.useState<
+    { status: 'loading' } | { status: 'ready'; branches: string[] } | { status: 'notGit' } | { status: 'error' }
+  >({ status: 'loading' });
+  const [worktreeProbeAttempt, setWorktreeProbeAttempt] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+    const path = projectPath?.trim();
+    if (!path) {
+      setWorktreeProbe((current) => (current.status === 'loading' ? current : { status: 'loading' }));
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const isGit = await checkIsGitRepository(path);
+        if (cancelled) return;
+        if (!isGit) {
+          setWorktreeProbe({ status: 'notGit' });
+          return;
+        }
+        const branchList = await getGitBranches(path, { remote: 'local' });
+        if (cancelled) return;
+        if (!branchList?.all || !Array.isArray(branchList.all)) {
+          setWorktreeProbe({ status: 'error' });
+          return;
+        }
+        const displayed = [...new Set(branchList.all.filter((name) => name.trim().length > 0))]
+          .sort((a, b) => a.localeCompare(b));
+        setWorktreeProbe({ status: 'ready', branches: displayed });
+      } catch {
+        if (!cancelled) setWorktreeProbe({ status: 'error' });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectPath, worktreeProbeAttempt]);
 
   const [draft, setDraft] = React.useState<ScheduledTaskDraft>(() =>
     toDraft(task, {
@@ -1216,41 +1082,13 @@ export function ScheduledTaskEditorDialog(props: {
       return;
     }
 
-    const payload: Partial<ScheduledTask> = {
-      ...(draft.id ? { id: draft.id } : {}),
-      name: draft.name.trim(),
-      targetSessionId: draft.sessionMode === 'existing' ? draft.targetSessionId : '',
-      enabled: draft.enabled,
-      schedule: {
-        kind: draft.schedule.kind,
-        timezone: draft.schedule.timezone.trim(),
-        ...(draft.schedule.kind === 'cron'
-          ? { cron: draft.schedule.cronExpression.trim() }
-          : draft.schedule.kind === 'once'
-            ? {
-                date: draft.schedule.onceDate,
-                time: draft.schedule.onceTime,
-            }
-            : {
-                times: dedupeSortTimes(draft.schedule.times),
-                ...(draft.schedule.kind === 'weekly' ? { weekdays: draft.schedule.weekdays } : {}),
-              }),
-      },
-      execution: {
-        prompt: draft.execution.prompt,
-        ...(draft.execution.useDefaults ? { useDefaults: true } : {}),
-        providerID: draft.execution.providerID,
-        modelID: draft.execution.modelID,
-        ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
-        ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
-        ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
-        ...(draft.execution.goalEnabled ? { goalEnabled: true } : {}),
-        ...(draft.execution.goalEnabled && draft.execution.goalTokenBudget
-          ? { goalTokenBudget: draft.execution.goalTokenBudget }
-          : {}),
-      },
-    };
+    const payload = buildScheduledTaskPayload(draft);
     if (draft.state && draft.sessionMode === 'new') payload.state = draft.state;
+    // A non-git project has nothing to branch from: keep the field honest even
+    // when the stored task still asks for isolation.
+    if (draft.sessionMode === 'new' && worktreeProbe.status === 'notGit') {
+      payload.runInWorktree = false;
+    }
 
     setSaving(true);
     try {
@@ -1261,7 +1099,7 @@ export function ScheduledTaskEditorDialog(props: {
     } finally {
       setSaving(false);
     }
-  }, [draft, onOpenChange, onSave, t]);
+  }, [draft, onOpenChange, onSave, t, worktreeProbe.status]);
 
   const descriptionId = React.useId();
   const hasOpenFloatingMenu = React.useCallback(() => {
@@ -1599,6 +1437,55 @@ export function ScheduledTaskEditorDialog(props: {
               </div>
             </div>
           )}
+
+          {draft.sessionMode === 'new' && projectPath?.trim() ? (
+            <div className="flex flex-col gap-1">
+              <label className="inline-flex cursor-pointer items-center gap-2">
+                <Checkbox
+                  checked={draft.runInWorktree && worktreeProbe.status !== 'notGit'}
+                  onChange={(runInWorktree) => setDraft((prev) => ({ ...prev, runInWorktree }))}
+                  disabled={worktreeProbe.status === 'notGit'}
+                  ariaLabel={t('sessions.scheduledTasks.editor.worktree.label')}
+                />
+                <span className="typography-meta">{t('sessions.scheduledTasks.editor.worktree.label')}</span>
+              </label>
+              {worktreeProbe.status === 'notGit' ? (
+                <p className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.worktree.notRepo')}</p>
+              ) : (
+                <p className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.worktree.hint')}</p>
+              )}
+              {worktreeProbe.status === 'error' ? (
+                <div className="flex items-center gap-2 typography-meta text-muted-foreground">
+                  <span>{t('sessions.scheduledTasks.editor.worktree.probeFailed')}</span>
+                  <Button type="button" variant="ghost" size="xs" onClick={() => setWorktreeProbeAttempt((attempt) => attempt + 1)}>
+                    {t('sessions.scheduledTasks.editor.targetRetry')}
+                  </Button>
+                </div>
+              ) : null}
+              <div className="flex flex-col gap-1">
+                <FieldLabel>{t('sessions.scheduledTasks.editor.worktree.baseBranch.label')}</FieldLabel>
+                <Select
+                  value={draft.baseBranch.trim() || '__worktreeHead'}
+                  disabled={!draft.runInWorktree || worktreeProbe.status !== 'ready'}
+                  onValueChange={(value) => setDraft((prev) => ({
+                    ...prev,
+                    baseBranch: value === '__worktreeHead' ? '' : value,
+                  }))}
+                >
+                  <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__worktreeHead">{t('sessions.scheduledTasks.editor.worktree.baseBranch.default')}</SelectItem>
+                    {(() => {
+                      const stored = draft.baseBranch.trim();
+                      const list = worktreeProbe.status === 'ready' ? worktreeProbe.branches : [];
+                      return (stored && !list.includes(stored) ? [stored, ...list] : list)
+                        .map((branch) => <SelectItem key={branch} value={branch}>{branch}</SelectItem>);
+                    })()}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          ) : null}
 
           <label className="inline-flex cursor-pointer items-center gap-2">
             <Checkbox

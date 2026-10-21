@@ -52,6 +52,10 @@ export type ScheduledTask = {
     lastError?: string;
     lastDurationMs?: number;
     lastSessionId?: string;
+    /** Whether the latest run opened its own worktree instead of the checkout (#1959). */
+    lastRunIsolated?: boolean;
+    /** Ref the isolated run branched from; absent when isolation was off. */
+    lastRunBranch?: string;
     nextRunAt?: number;
   };
 };
