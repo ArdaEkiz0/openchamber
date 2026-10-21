@@ -27,8 +27,9 @@ type UseNestedGitDirectoryOptions = {
 /**
  * Resolves the repository a git surface operates on when the project root may
  * not itself be a git repository. Owns the full resolution flow: probing the
- * root, discovering nested repositories, auto-selecting the first one, and
- * dropping a selection whose repository disappeared.
+ * root, discovering nested repositories, auto-selecting the first one that is
+ * not under a dot-directory (#5357), and dropping a selection whose repository
+ * disappeared.
  *
  * A root repository with no commits yet (a fresh `git init`, #4886) hides
  * nothing below it: discovery keeps running, a nested selection keeps
