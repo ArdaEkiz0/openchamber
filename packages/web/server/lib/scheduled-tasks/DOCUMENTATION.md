@@ -176,13 +176,13 @@ checkout itself:
   existing-session target. The fields are inert on an existing-session task
   anyway: reuse dispatches through the target-session path, which returns
   before isolation is ever consulted.
-- **Storage.** Both live on the task in the project config like every other
-  user-set field, and both are written only when set: the switch is stored as
-  `runInWorktree: true` and dropped when off (which reads as off), and an empty
-  branch is dropped too, so an empty value means "start from `HEAD`". A write
-  that omits either keeps the stored choice. The editor sends the branch even
-  while the switch is off, so turning isolation back on restores it without
-  re-picking.
+- **Storage.** These live on the task in the project config like every other
+  user-set field, and are written only when they differ from the default: the
+  switch is stored as `runInWorktree: true` and dropped when off (which reads as
+  off), the branch is dropped when empty, and `cleanupWorktree: false` is stored
+  only for a task that keeps its worktree. A write that omits any of them keeps
+  the stored choice. The editor sends the branch even while the switch is off,
+  so turning isolation back on restores it without re-picking.
 - **Gate.** Storing a `baseBranch` containing whitespace is rejected outright
   (`baseBranch must be a branch name without spaces`); a stored value that is
   not a string is dropped silently when the run reads it. `runInWorktree` is
@@ -197,11 +197,15 @@ checkout itself:
   silent in-directory fallback: a git project asking for isolation either runs
   isolated or fails. Before the git routes register, the bridge answers with a
   failure, so a run in that window fails as well.
-- **Teardown.** When the run's prompt/command finishes, the worktree and its
-  branch are removed (branch delete included); the run's session record
-  outlives the worktree and stays readable, but continuing that finished
-  session answers 404 (OpenCode 2.x behavior for a deleted directory). A
-  teardown failure is logged and never
+- **Teardown.** Whether the worktree outlives the run is the user's choice.
+  `cleanupWorktree` defaults to on: when the run's prompt/command finishes, the
+  worktree and the branch made for it are removed (branch delete included), and
+  the run's session record outlives the worktree and stays readable — continuing
+  that finished session answers 404 (OpenCode 2.x behavior for a deleted
+  directory). With it off, both are kept so the result can be opened and
+  reviewed afterwards, and only then does `state.lastRunBranch` name the branch
+  the run used; the task card shows the branch only for a kept worktree and says
+  just "own worktree" otherwise. A teardown failure is logged and never
   overrides the run's own result.
 - **State.** `state.lastRunIsolated` and `state.lastRunBranch` mirror what the
   last run actually did; the `openchamber:scheduled-task-ran` event payload

@@ -372,6 +372,13 @@ const normalizeTaskForStorage = (value, options) => {
   if (baseBranchRaw && /[\s\u0000-\u001f]/.test(baseBranchRaw)) {
     throw new Error('baseBranch must be a branch name without spaces');
   }
+  // Whether the run's worktree and branch are removed when it ends. Absent
+  // means cleanup, which is what isolation did before this field existed; a
+  // write that omits it keeps what the task stored, so an older client cannot
+  // silently start or stop keeping worktrees (#1959).
+  const cleanupWorktree = typeof value.cleanupWorktree === 'boolean'
+    ? value.cleanupWorktree
+    : existingTask?.cleanupWorktree !== false;
 
   // Loop provenance: absolute path of the `.agents/loops/*.md` file driving
   // this task, when any. Preserved on every write so the scheduler can detect
@@ -395,6 +402,9 @@ const normalizeTaskForStorage = (value, options) => {
     state,
     ...(runInWorktree ? { runInWorktree: true } : {}),
     ...(baseBranchRaw ? { baseBranch: baseBranchRaw } : {}),
+    // Written with the isolation fields: a task that keeps its worktree has to
+    // say so, and a task that cleans up carries nothing (the default).
+    ...(runInWorktree && cleanupWorktree === false ? { cleanupWorktree: false } : {}),
     ...(loopFile ? { loopFile } : {}),
   };
   if (targetSessionId) storedTask.targetSessionId = targetSessionId;

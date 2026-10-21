@@ -31,6 +31,8 @@ export type ScheduledTaskDraft = {
   };
   runInWorktree: boolean;
   baseBranch: string;
+  /** Remove the run's worktree and branch when it ends; off keeps them. */
+  cleanupWorktree: boolean;
   state?: ScheduledTask['state'];
 };
 
@@ -88,6 +90,7 @@ export const toDraft = (
       },
       runInWorktree: false,
       baseBranch: '',
+      cleanupWorktree: true,
     };
   }
 
@@ -133,6 +136,7 @@ export const toDraft = (
     },
     runInWorktree: task.runInWorktree === true,
     baseBranch: typeof task.baseBranch === 'string' ? task.baseBranch : '',
+    cleanupWorktree: task.cleanupWorktree !== false,
     state: task.state,
   };
 };
@@ -230,6 +234,7 @@ export const buildScheduledTaskPayload = (draft: ScheduledTaskDraft): Partial<Sc
   if (draft.sessionMode === 'new') {
     payload.runInWorktree = draft.runInWorktree;
     payload.baseBranch = draft.baseBranch.trim();
+    payload.cleanupWorktree = draft.cleanupWorktree;
   }
   return payload;
 };

@@ -24,7 +24,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { fetchEligibleScheduledTaskTargets } from '@/lib/scheduledTasksApi';
-import { checkIsGitRepository, getGitBranches } from '@/lib/gitApi';
+import { BranchSelector, useBranchOptions } from '@/components/multirun/BranchSelector';
 // Draft shape and payload building live in scheduledTaskEditorDraft.ts so they
 // can be unit-tested without mounting the dialog.
 import {
@@ -462,10 +462,6 @@ const isSameCalendarDay = (a: Date, b: Date) => (
   && a.getDate() === b.getDate()
 );
 
-// Select needs a value for "no branch picked"; the draft keeps '' so the run
-// starts from HEAD and the sentinel never reaches the saved task.
-const WORKTREE_HEAD_VALUE = '__worktreeHead';
-
 const CronScheduleSection: React.FC<{
   draft: ScheduledTaskDraft;
   setDraft: React.Dispatch<React.SetStateAction<ScheduledTaskDraft>>;
@@ -637,49 +633,12 @@ export function ScheduledTaskEditorDialog(props: {
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const weekStartPreference = useUIStore((state) => state.weekStartPreference);
   const isMobile = useUIStore((state) => state.isMobile);
-  // The worktree switch only makes sense for a project path the run can branch
-  // from, so the section is driven by a probe of the chosen project.
+  // The project the run works in: the base-branch picker reads its branches
+  // from here, the same way the New worktree dialog and multi-run do.
   const projectPath = useProjectsStore((state) => state.projects.find((entry) => entry.id === props.projectId)?.path ?? null);
-  const [worktreeProbe, setWorktreeProbe] = React.useState<
-    { status: 'loading' } | { status: 'ready'; branches: string[] } | { status: 'notGit' } | { status: 'error' }
-  >({ status: 'loading' });
-  const [worktreeProbeAttempt, setWorktreeProbeAttempt] = React.useState(0);
-
-  React.useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    const path = projectPath?.trim();
-    if (!path) {
-      setWorktreeProbe((current) => (current.status === 'loading' ? current : { status: 'loading' }));
-      return undefined;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const isGit = await checkIsGitRepository(path);
-        if (cancelled) return;
-        if (!isGit) {
-          setWorktreeProbe({ status: 'notGit' });
-          return;
-        }
-        const branchList = await getGitBranches(path, { remote: 'local' });
-        if (cancelled) return;
-        if (!branchList?.all || !Array.isArray(branchList.all)) {
-          setWorktreeProbe({ status: 'error' });
-          return;
-        }
-        const displayed = [...new Set(branchList.all.filter((name) => name.trim().length > 0))]
-          .sort((a, b) => a.localeCompare(b));
-        setWorktreeProbe({ status: 'ready', branches: displayed });
-      } catch {
-        if (!cancelled) setWorktreeProbe({ status: 'error' });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [open, projectPath, worktreeProbeAttempt]);
+  // Same hook `BranchSelector` uses; calling it here only reads the store's
+  // answer so the editor can say when the folder is not a repository.
+  const branchOptions = useBranchOptions(projectPath);
 
   const [draft, setDraft] = React.useState<ScheduledTaskDraft>(() =>
     toDraft(task, {
@@ -1089,8 +1048,9 @@ export function ScheduledTaskEditorDialog(props: {
     const payload = buildScheduledTaskPayload(draft);
     if (draft.state && draft.sessionMode === 'new') payload.state = draft.state;
     // A non-git project has nothing to branch from: keep the field honest even
-    // when the stored task still asks for isolation.
-    if (draft.sessionMode === 'new' && worktreeProbe.status === 'notGit') {
+    // when the stored task still asks for isolation. The runtime also falls
+    // back to an in-directory run, so this only keeps the record truthful.
+    if (draft.sessionMode === 'new' && branchOptions.isGitRepository === false) {
       payload.runInWorktree = false;
     }
 
@@ -1103,7 +1063,7 @@ export function ScheduledTaskEditorDialog(props: {
     } finally {
       setSaving(false);
     }
-  }, [draft, onOpenChange, onSave, t, worktreeProbe.status]);
+  }, [branchOptions.isGitRepository, draft, onOpenChange, onSave, t]);
 
   const descriptionId = React.useId();
   const hasOpenFloatingMenu = React.useCallback(() => {
@@ -1446,56 +1406,44 @@ export function ScheduledTaskEditorDialog(props: {
             <div className="flex flex-col gap-1">
               <label className="inline-flex cursor-pointer items-center gap-2">
                 <Checkbox
-                  checked={draft.runInWorktree && worktreeProbe.status !== 'notGit'}
+                  checked={draft.runInWorktree}
                   onChange={(runInWorktree) => setDraft((prev) => ({ ...prev, runInWorktree }))}
-                  disabled={worktreeProbe.status === 'notGit'}
                   ariaLabel={t('sessions.scheduledTasks.editor.worktree.label')}
                 />
                 <span className="typography-meta">{t('sessions.scheduledTasks.editor.worktree.label')}</span>
               </label>
-              {worktreeProbe.status === 'notGit' ? (
-                <p className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.worktree.notRepo')}</p>
-              ) : (
-                <p className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.worktree.hint')}</p>
-              )}
-              {worktreeProbe.status === 'error' ? (
-                <div className="flex items-center gap-2 typography-meta text-muted-foreground">
-                  <span>{t('sessions.scheduledTasks.editor.worktree.probeFailed')}</span>
-                  <Button type="button" variant="ghost" size="xs" onClick={() => setWorktreeProbeAttempt((attempt) => attempt + 1)}>
-                    {t('sessions.scheduledTasks.editor.targetRetry')}
-                  </Button>
-                </div>
+              <p className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.worktree.hint')}</p>
+              {/* The picker belongs to isolation, so it is absent while the
+                  switch is off rather than sitting there greyed out. */}
+              {draft.runInWorktree ? (
+                <>
+                  <div className="flex flex-col gap-1">
+                    <FieldLabel>{t('sessions.scheduledTasks.editor.worktree.baseBranch.label')}</FieldLabel>
+                    <BranchSelector
+                      directory={projectPath}
+                      value={draft.baseBranch}
+                      onChange={(branch) => setDraft((prev) => ({ ...prev, baseBranch: branch }))}
+                      className="w-fit"
+                    />
+                    {branchOptions.isGitRepository === false ? (
+                      <p className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.worktree.notRepo')}</p>
+                    ) : null}
+                  </div>
+                  <label className="inline-flex cursor-pointer items-center gap-2">
+                    <Checkbox
+                      checked={draft.cleanupWorktree}
+                      onChange={(cleanupWorktree) => setDraft((prev) => ({ ...prev, cleanupWorktree }))}
+                      ariaLabel={t('sessions.scheduledTasks.editor.worktree.cleanup.label')}
+                    />
+                    <span className="typography-meta">{t('sessions.scheduledTasks.editor.worktree.cleanup.label')}</span>
+                  </label>
+                  <p className="typography-meta text-muted-foreground">
+                    {draft.cleanupWorktree
+                      ? t('sessions.scheduledTasks.editor.worktree.cleanup.hint')
+                      : t('sessions.scheduledTasks.editor.worktree.cleanup.keepHint')}
+                  </p>
+                </>
               ) : null}
-              <div className="flex flex-col gap-1">
-                <FieldLabel>{t('sessions.scheduledTasks.editor.worktree.baseBranch.label')}</FieldLabel>
-                <Select
-                  value={draft.baseBranch.trim() || WORKTREE_HEAD_VALUE}
-                  disabled={!draft.runInWorktree || worktreeProbe.status !== 'ready'}
-                  onValueChange={(value) => setDraft((prev) => ({
-                    ...prev,
-                    baseBranch: value === WORKTREE_HEAD_VALUE ? '' : value,
-                  }))}
-                >
-                  <SelectTrigger className="w-fit max-w-full">
-                    {/* The sentinel is an internal value; the trigger shows the
-                        same words the matching item does. */}
-                    <SelectValue>
-                      {(value) => (value === WORKTREE_HEAD_VALUE
-                        ? t('sessions.scheduledTasks.editor.worktree.baseBranch.default')
-                        : value)}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={WORKTREE_HEAD_VALUE}>{t('sessions.scheduledTasks.editor.worktree.baseBranch.default')}</SelectItem>
-                    {(() => {
-                      const stored = draft.baseBranch.trim();
-                      const list = worktreeProbe.status === 'ready' ? worktreeProbe.branches : [];
-                      return (stored && !list.includes(stored) ? [stored, ...list] : list)
-                        .map((branch) => <SelectItem key={branch} value={branch}>{branch}</SelectItem>);
-                    })()}
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
           ) : null}
 

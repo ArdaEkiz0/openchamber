@@ -766,11 +766,14 @@ export const createScheduledTasksRuntime = (deps) => {
         finishedAt,
       };
     } finally {
-      // The run is over, so the worktree made for it goes away: recurring
-      // isolated tasks must not accumulate worktrees (#1959). The branch goes
-      // with it, the way a finished multi-run lane is torn down. A removal
-      // failure is logged, never thrown over the run's own outcome.
-      if (isolation && typeof removeTaskWorktree === 'function') {
+      // The run is over. By default the worktree made for it goes away, with
+      // its branch, so recurring isolated tasks do not accumulate worktrees
+      // (#1959). A task can ask to keep both instead, so the result can be
+      // opened and reviewed afterwards; then nothing is removed and the state
+      // records the branch the run used. A removal failure is logged, never
+      // thrown over the run's own outcome.
+      const cleanupWorktree = task.cleanupWorktree !== false;
+      if (isolation && cleanupWorktree && typeof removeTaskWorktree === 'function') {
         try {
           await removeTaskWorktree({
             projectDirectory: projectPath,
@@ -1122,7 +1125,12 @@ export const createScheduledTasksRuntime = (deps) => {
         lastError: status === 'error' ? errorMessage : undefined,
         lastSessionId: sessionID ?? createdSessionID,
         lastRunIsolated: runIsolation ? true : undefined,
-        lastRunBranch: runIsolation?.branch ? String(runIsolation.branch) : undefined,
+        // Only a run that kept its worktree has a branch worth naming: a
+        // cleaned-up run's branch is gone, and the card says just "own
+        // worktree" for it.
+        lastRunBranch: runIsolation && task.cleanupWorktree === false && runIsolation.branch
+          ? String(runIsolation.branch)
+          : undefined,
         nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
         updatedAt: finishedAt,
       };

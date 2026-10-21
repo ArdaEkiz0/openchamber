@@ -463,14 +463,68 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
       worktreeDirectory: '/repo/.worktrees/scheduled-run-1',
       deleteLocalBranch: true,
     }]);
-    // The task record remembers how the run actually executed.
+    // The record remembers that the run isolated, but not the branch: the
+    // cleanup removed it, and the card shows the branch only when it stayed.
     expect(patches.at(-1)).toMatchObject({
       lastStatus: 'success',
       lastRunIsolated: true,
-      lastRunBranch: 'release/2.5',
+      lastRunBranch: undefined,
     });
     // The checkout was never used as the run directory.
     expect(result.directory).not.toBe('/repo');
+  });
+
+  it('keeps the worktree and branch when the task asks not to clean up (#1959)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      const data = pathname === '/api/session' ? { id: 'ses_keep' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo/.worktrees/scheduled-run-1' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly review',
+      enabled: true,
+      runInWorktree: true,
+      baseBranch: 'release/2.5',
+      cleanupWorktree: false,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const removals = [];
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createTaskWorktree: async () => ({ directory: '/repo/.worktrees/scheduled-run-1', branch: 'openchamber/keep-me' }),
+      removeTaskWorktree: async (input) => { removals.push(input); },
+      isGitRepository: async () => true,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(true);
+    // Nothing removed: the result stays openable, so the branch is recorded and
+    // the card can name it.
+    expect(removals).toEqual([]);
+    expect(patches.at(-1)).toMatchObject({
+      lastStatus: 'success',
+      lastRunIsolated: true,
+      lastRunBranch: 'openchamber/keep-me',
+    });
   });
 
   it('fails an isolated run whose worktree cannot be created instead of dirtying the checkout (#1959)', async () => {
@@ -725,7 +779,7 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(result.ok).toBe(true);
     expect(result.isolation).toEqual({ directory: '/repo/.worktrees/scheduled-run-1', branch: 'release/2.5' });
     expect(warnEntries.some((message) => message.includes('failed to clean up the isolated worktree'))).toBe(true);
-    expect(patches.at(-1)).toMatchObject({ lastStatus: 'success', lastRunIsolated: true, lastRunBranch: 'release/2.5' });
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'success', lastRunIsolated: true, lastRunBranch: undefined });
   });
 
   it('falls back to the in-directory run for a non-git project and keeps the pick when isolation is off (#1959)', async () => {

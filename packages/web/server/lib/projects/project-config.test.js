@@ -124,6 +124,26 @@ describe('project-config runtime', () => {
       });
       expect(off.task.runInWorktree).toBeUndefined();
       expect(off.task.baseBranch).toBe('release/2.5');
+
+      // Cleanup is on unless the task says otherwise, and the choice survives a
+      // reload; switching it back on drops the flag instead of storing true.
+      const keeping = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        id: plain.task.id,
+        runInWorktree: true,
+        cleanupWorktree: false,
+      });
+      expect(keeping.task.cleanupWorktree).toBe(false);
+      const keepingReloaded = await runtime.listScheduledTasks('project-test');
+      expect(keepingReloaded.find((task) => task.id === plain.task.id)?.cleanupWorktree).toBe(false);
+
+      const cleaned = await runtime.upsertScheduledTask('project-test', {
+        ...base,
+        id: plain.task.id,
+        runInWorktree: true,
+        cleanupWorktree: true,
+      });
+      expect(cleaned.task.cleanupWorktree).toBeUndefined();
     } finally {
       await cleanup();
     }

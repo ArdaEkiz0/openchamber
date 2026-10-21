@@ -81,4 +81,40 @@ describe('scheduledTaskEditorDraft.buildScheduledTaskPayload', () => {
     expect(payload.runInWorktree).toBe(true);
     expect(payload.baseBranch).toBe('');
   });
+
+  test('cleanup defaults on and is sent with the isolation fields', () => {
+    const fresh = buildScheduledTaskPayload({
+      ...toDraft(null, defaults),
+      runInWorktree: true,
+      baseBranch: 'main',
+    });
+    expect(fresh.cleanupWorktree).toBe(true);
+
+    const keeping = buildScheduledTaskPayload({
+      ...toDraft(null, defaults),
+      runInWorktree: true,
+      baseBranch: 'main',
+      cleanupWorktree: false,
+    });
+    expect(keeping.cleanupWorktree).toBe(false);
+  });
+
+  test('a task that keeps its worktree reads back as cleanup off', () => {
+    const draft = toDraft({ ...baseTask, cleanupWorktree: false } as never, defaults);
+    expect(draft.cleanupWorktree).toBe(false);
+    // Absent means cleanup, which is what isolation did before the field existed.
+    expect(toDraft(baseTask as never, defaults).cleanupWorktree).toBe(true);
+  });
+
+  test('a chats-scope task never carries the cleanup choice either', () => {
+    const draft: ScheduledTaskDraft = {
+      ...toDraft(null, defaults),
+      sessionMode: 'existing',
+      targetSessionId: 'ses-1',
+      runInWorktree: true,
+      cleanupWorktree: false,
+    };
+    const payload = buildScheduledTaskPayload(draft);
+    expect('cleanupWorktree' in payload).toBe(false);
+  });
 });
