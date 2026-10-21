@@ -14,7 +14,7 @@ import {
   type VSCodeThemeKind,
   type VSCodeThemePayload,
 } from '@openchamber/ui/lib/theme/vscode/adapter';
-import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber/ui/lib/i18n';
+import { formatMessage, getBootstrapMessages, readStoredLocaleForBootstrap, useI18nStore, type I18nKey } from '@openchamber/ui/lib/i18n';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
 import { permissionPolicyWireSchema, policySnapshotFromWire } from '@openchamber/ui/stores/utils/permissionAutoAccept';
@@ -332,15 +332,27 @@ const unsupportedWebRouteResponse = (feature: string): Response => {
   return jsonResponse({ error: `${feature} is not supported in VS Code` }, 501);
 };
 
-/** Answers a local API route from a bridge call; validation failures come back as 400, the rest as 500. */
-const bridgeJsonRoute = async (bridgeType: string, payload: unknown): Promise<Response> => {
+/**
+ * Answers a local API route from a bridge call; validation failures come back
+ * as 400, the rest as 500. A host failure whose code is in `answeredCodes`
+ * comes back as 409 with that code, the way the web server's route answers it.
+ */
+const bridgeJsonRoute = async (bridgeType: string, payload: unknown, answeredCodes: readonly string[] = []): Promise<Response> => {
   try {
     return jsonResponse(await sendBridgeMessage(bridgeType, payload), 200);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Request failed';
+    if (error instanceof BridgeRequestError && error.code && answeredCodes.includes(error.code)) {
+      return jsonResponse({ error: message, code: error.code }, 409);
+    }
     return jsonResponse({ error: message }, /must be|is required|session id/.test(message) ? 400 : 500);
   }
 };
+
+// The host could not write metadata because the session's folder is gone; the
+// UI then offers archive. Mirrors `SESSION_DIRECTORY_MISSING_CODE` in
+// packages/vscode/src/bridge-system-runtime.ts.
+const SESSION_DIRECTORY_MISSING_CODE = 'SESSION_DIRECTORY_MISSING';
 
 const pluginConfigErrorStatus = (message: string): number => {
   const lower = message.toLowerCase();
@@ -444,7 +456,7 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     if (method === 'GET') return bridgeJsonRoute('api:sessions/metadata:get', { sessionId });
     const body = await extractJsonBody(input, init, method);
     const patch = body && typeof body === 'object' && !Array.isArray(body) ? (body as { patch?: unknown }).patch : undefined;
-    return bridgeJsonRoute('api:sessions/metadata:set', { sessionId, patch });
+    return bridgeJsonRoute('api:sessions/metadata:set', { sessionId, patch }, [SESSION_DIRECTORY_MISSING_CODE]);
   }
 
   if (/^\/api\/projects\/[^/]+\/scheduled-tasks(?:\/[^/]+)?$/.test(normalizedPathname)) {
@@ -482,7 +494,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return new Response(
       JSON.stringify({
         statusSessions: {},
-        attentionSessions: {},
         activitySessions: activity || {},
         serverTime: Date.now(),
       }),
@@ -493,7 +504,7 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     );
   }
 
-  if (/^\/api\/sessions\/[^/]+\/(view|unview)$/.test(normalizedPathname) && method === 'POST') {
+  if (/^\/api\/sessions\/[^/]+\/view$/.test(normalizedPathname) && method === 'POST') {
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -574,38 +585,11 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     );
   }
 
-  if (normalizedPathname === '/api/sessions/attention' && method === 'GET') {
-    return new Response(
-      JSON.stringify({
-        sessions: {},
-        serverTime: Date.now(),
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  }
-
   if (/^\/api\/sessions\/[^/]+\/status$/.test(normalizedPathname) && method === 'GET') {
     const sessionId = normalizedPathname.split('/')[3] || '';
     return new Response(
       JSON.stringify({
         error: 'Session not found or no state available',
-        sessionId,
-      }),
-      {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      },
-    );
-  }
-
-  if (/^\/api\/sessions\/[^/]+\/attention$/.test(normalizedPathname) && method === 'GET') {
-    const sessionId = normalizedPathname.split('/')[3] || '';
-    return new Response(
-      JSON.stringify({
-        error: 'Session not found or no attention state available',
         sessionId,
       }),
       {
@@ -1931,15 +1915,52 @@ const fetchLastAssistantMessageText = async (sessionId: string, messageId?: stri
   }
 };
 
+type NotificationTemplateKey = 'completion' | 'subtask' | 'error' | 'question';
+
+// The same defaults the settings page shows as placeholders. An empty field
+// means "no custom text", so the notification follows the interface language.
+const NOTIFICATION_TEMPLATE_DEFAULT_KEYS = {
+  completion: {
+    title: 'settings.notifications.page.template.defaults.completion.title',
+    message: 'settings.notifications.page.template.defaults.completion.message',
+  },
+  subtask: {
+    title: 'settings.notifications.page.template.defaults.subtask.title',
+    message: 'settings.notifications.page.template.defaults.subtask.message',
+  },
+  error: {
+    title: 'settings.notifications.page.template.defaults.error.title',
+    message: 'settings.notifications.page.template.defaults.error.message',
+  },
+  question: {
+    title: 'settings.notifications.page.template.defaults.question.title',
+    message: 'settings.notifications.page.template.defaults.question.message',
+  },
+} satisfies Record<NotificationTemplateKey, { title: I18nKey; message: I18nKey }>;
+
+const notificationText = (key: I18nKey): string => (
+  formatMessage(useI18nStore.getState().dictionary, key)
+);
+
+const notificationTemplateDefaults = (key: NotificationTemplateKey) => ({
+  title: notificationText(NOTIFICATION_TEMPLATE_DEFAULT_KEYS[key].title),
+  message: notificationText(NOTIFICATION_TEMPLATE_DEFAULT_KEYS[key].message),
+});
+
 const getNotificationTemplate = (
   settings: { notificationTemplates?: Record<string, { title?: string; message?: string }> },
-  key: 'completion' | 'subtask' | 'error' | 'question',
-  fallback: { title: string; message: string },
+  key: NotificationTemplateKey,
+  // A caller whose event has its own wording (a permission ask) passes those
+  // defaults, so an empty field falls back to it and not to the shared label.
+  overrides?: { title: string; message: string },
 ) => {
   const candidate = settings.notificationTemplates?.[key];
+  const title = candidate?.title ?? '';
+  const message = candidate?.message ?? '';
+  const defaults = overrides ?? notificationTemplateDefaults(key);
   return {
-    title: typeof candidate?.title === 'string' ? candidate.title : fallback.title,
-    message: typeof candidate?.message === 'string' ? candidate.message : fallback.message,
+    title: title.trim().length > 0 ? title : defaults.title,
+    message: message.trim().length > 0 ? message : defaults.message,
   };
 };
 
@@ -2011,12 +2032,14 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       const lastAt = readyNotificationCooldowns.get(sessionId) ?? 0;
       if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
       readyNotificationCooldowns.set(sessionId, now);
-      const template = getNotificationTemplate(settings, isSubtask ? 'subtask' : 'completion', { title: '{agent_name} is ready', message: '{model_name} completed the task' });
-      const title = resolveTemplate(template.title, variables) || 'Agent is ready';
+      const templateKey: NotificationTemplateKey = isSubtask ? 'subtask' : 'completion';
+      const defaults = notificationTemplateDefaults(templateKey);
+      const template = getNotificationTemplate(settings, templateKey);
+      const title = resolveTemplate(template.title, variables) || resolveTemplate(defaults.title, variables);
       const body = resolveTemplate(template.message, variables);
       showOpenChamberNotification({
         title,
-        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : `${variables.model_name} completed the task`,
+        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : resolveTemplate(defaults.message, variables),
         sessionId,
         requireHidden,
       });
@@ -2029,12 +2052,13 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       const lastAt = errorNotificationCooldowns.get(sessionId) ?? 0;
       if (now - lastAt < READY_NOTIFICATION_COOLDOWN_MS) return;
       errorNotificationCooldowns.set(sessionId, now);
-      const template = getNotificationTemplate(settings, 'error', { title: 'Tool error', message: '{last_message}' });
-      const title = resolveTemplate(template.title, variables) || 'Tool error';
+      const defaults = notificationTemplateDefaults('error');
+      const template = getNotificationTemplate(settings, 'error');
+      const title = resolveTemplate(template.title, variables) || resolveTemplate(defaults.title, variables);
       const body = resolveTemplate(template.message, variables);
       showOpenChamberNotification({
         title,
-        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : 'An error occurred',
+        body: shouldApplyTemplateMessage(template.message, body, variables) ? body : notificationText('notifications.error.bodyFallback'),
         sessionId,
         requireHidden,
       });
@@ -2046,12 +2070,13 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       if (!settings.notifyOnQuestion) return;
       const header = syncEvent.properties.form.title;
       const questionVariables = { ...variables, last_message: header };
-      const template = getNotificationTemplate(settings, 'question', { title: 'Input needed', message: '{last_message}' });
-      const title = resolveTemplate(template.title, questionVariables) || header || 'Input needed';
+      const defaults = notificationTemplateDefaults('question');
+      const template = getNotificationTemplate(settings, 'question');
+      const title = resolveTemplate(template.title, questionVariables) || header || resolveTemplate(defaults.title, questionVariables);
       const body = resolveTemplate(template.message, questionVariables);
       showOpenChamberNotification({
         title,
-        body: shouldApplyTemplateMessage(template.message, body, questionVariables) ? body : header || 'Agent is waiting for your response',
+        body: shouldApplyTemplateMessage(template.message, body, questionVariables) ? body : notificationText('notifications.question.bodyFallback'),
         sessionId,
         requireHidden,
       });
@@ -2063,10 +2088,14 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
       const request = syncEvent.properties;
       const accepted = await processVSCodePermissionAutoAccept(request, directory ?? undefined);
       if (accepted) return;
-      const fallbackMessage = request.message || request.action || 'Agent is waiting for your approval';
+      const fallbackMessage = request.message || request.action || notificationText('notifications.permission.bodyFallback');
       const permissionVariables = { ...variables, last_message: fallbackMessage };
-      const template = getNotificationTemplate(settings, 'question', { title: 'Permission required', message: '{last_message}' });
-      const title = resolveTemplate(template.title, permissionVariables) || 'Permission required';
+      const defaults = {
+        ...notificationTemplateDefaults('question'),
+        title: notificationText('notifications.permission.title'),
+      };
+      const template = getNotificationTemplate(settings, 'question', defaults);
+      const title = resolveTemplate(template.title, permissionVariables) || resolveTemplate(defaults.title, permissionVariables);
       const body = resolveTemplate(template.message, permissionVariables);
       showOpenChamberNotification({
         title,
