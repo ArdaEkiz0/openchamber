@@ -1613,12 +1613,21 @@ const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.r
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
+// Isolated scheduled runs (#1959). The scheduled runtime exists before the git
+// routes are registered, so the actions it needs read through this bridge,
+// which the git routes registration fills once it is up.
+const scheduledWorktreeBridge = {};
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
   chatsScope: scheduledChatsScope,
   messageQueueRuntime,
   resolvePrimaryWorktreeRoot,
   isSessionArchived: (sessionID) => openChamberSessionService.archiveStore.isArchived(sessionID),
+  createTaskWorktree: (input) => scheduledWorktreeBridge.create?.(input),
+  removeTaskWorktree: (input) => scheduledWorktreeBridge.remove?.(input),
+  // null when the routes are not registered yet; the runtime treats that as
+  // "not a repository" and falls back to the in-directory run.
+  isGitRepository: (projectDirectory) => scheduledWorktreeBridge.isGitRepository?.(projectDirectory) ?? null,
   readSessionDefaults: async (projectID) => {
     const settings = await readSettingsFromDiskMigrated();
     const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.id === projectID) ?? null;
@@ -2557,6 +2566,7 @@ async function main(options = {}) {
     listConfiguredProjects,
     messageSearchRuntime,
     sessionWarmingRuntime,
+    scheduledWorktreeBridge,
     crypto,
     fs,
     os,

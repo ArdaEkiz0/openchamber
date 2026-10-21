@@ -285,6 +285,12 @@ const normalizeState = (value, fallback) => {
   const lastSessionId = asNonEmptyString(source.lastSessionId);
   const lastErrorRaw = asNonEmptyString(source.lastError);
   const lastError = lastErrorRaw ? clampLength(lastErrorRaw, MAX_LAST_ERROR_LENGTH) : undefined;
+  // The branch and isolation a completed run actually executed with (#1959),
+  // so the run history can tell "this ran in a worktree on release/2.5"
+  // apart from "this ran over the checkout".
+  const lastRunIsolated = source.lastRunIsolated === true;
+  const lastRunBranchRaw = asNonEmptyString(source.lastRunBranch);
+  const lastRunBranch = lastRunBranchRaw ? clampLength(lastRunBranchRaw, MAX_BRANCH_LENGTH) : undefined;
 
   return {
     createdAt: typeof source.createdAt === 'number' && Number.isFinite(source.createdAt)
@@ -300,6 +306,8 @@ const normalizeState = (value, fallback) => {
     ...(typeof lastScheduledFor === 'number' ? { lastScheduledFor } : {}),
     ...(lastSessionId ? { lastSessionId } : {}),
     ...(lastError ? { lastError } : {}),
+    ...(lastRunIsolated ? { lastRunIsolated: true } : {}),
+    ...(lastRunBranch ? { lastRunBranch } : {}),
   };
 };
 
