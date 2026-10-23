@@ -1,3 +1,0 @@
-export {
-  DiagramEditor
-} from './DiagramEditor';
