@@ -21,6 +21,18 @@ export const isValidOpenCodeHostname = (value) => {
   return trimmed.split('.').every((label) => HOSTNAME_LABEL_RE.test(label));
 };
 
+// Response deadline for OpenCode upstream proxy calls, in milliseconds. The
+// proxy cuts an OpenCode response whose first byte takes longer than this, so
+// an interrupted turn also fails its in-flight tool calls, pending permission
+// approvals included. Cold self-hosted gateways can legitimately exceed the
+// 4-minute default, so `OPENCHAMBER_PROXY_TIMEOUT_MS` overrides it and `0`
+// removes the deadline; anything else keeps the default.
+export const resolveProxyRequestTimeoutMs = (env = {}) => {
+  const raw = typeof env.OPENCHAMBER_PROXY_TIMEOUT_MS === 'string' ? env.OPENCHAMBER_PROXY_TIMEOUT_MS.trim() : '';
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 4 * 60 * 1000;
+};
+
 export const resolveOpenCodeEnvConfig = (options = {}) => {
   const env = options.env && typeof options.env === 'object' ? options.env : {};
   const logger = options.logger ?? console;

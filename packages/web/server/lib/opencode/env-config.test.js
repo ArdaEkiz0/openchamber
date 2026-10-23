@@ -1,5 +1,33 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isValidOpenCodeHostname, resolveOpenCodeEnvConfig } from './env-config.js';
+import { isValidOpenCodeHostname, resolveOpenCodeEnvConfig, resolveProxyRequestTimeoutMs } from './env-config.js';
+
+describe('resolveProxyRequestTimeoutMs', () => {
+  it('defaults to 4 minutes when the env var is absent', () => {
+    expect(resolveProxyRequestTimeoutMs({})).toBe(240000);
+    expect(resolveProxyRequestTimeoutMs()).toBe(240000);
+  });
+
+  it('reads OPENCHAMBER_PROXY_TIMEOUT_MS in milliseconds', () => {
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '900000' })).toBe(900000);
+  });
+
+  it('accepts 0 as a removed deadline', () => {
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '0' })).toBe(0);
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: ' 30000 ' })).toBe(30000);
+  });
+
+  it('falls back to the default for anything that is not a non-negative number', () => {
+    const invalid = ['', '   ', 'abc', '-5', '1e999', 'on', 'four'];
+    for (const value of invalid) {
+      expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: value }), JSON.stringify(value)).toBe(240000);
+    }
+    // A non-string value reads as absent.
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: 30000 })).toBe(240000);
+  });
+});
 
 describe('isValidOpenCodeHostname', () => {
   it('accepts IPv4 addresses', () => {
