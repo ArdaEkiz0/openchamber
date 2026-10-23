@@ -249,6 +249,9 @@
     "tunnelMode": {
       "scope": "instance"
     },
+    "tunnelHttpsPort": {
+      "scope": "instance"
+    },
     "tunnelBootstrapTtlMs": {
       "scope": "instance"
     },
@@ -490,6 +493,9 @@
     "enterToSendConfigured": {
       "scope": "profile"
     },
+    "mobileReturnKeySends": {
+      "scope": "profile"
+    },
     "persistChatDraft": {
       "scope": "profile"
     },
@@ -577,6 +583,9 @@
       "scope": "profile"
     },
     "walkthroughModelOverride": {
+      "scope": "profile"
+    },
+    "walkthroughModelVariant": {
       "scope": "profile"
     },
     "fallbackModel": {

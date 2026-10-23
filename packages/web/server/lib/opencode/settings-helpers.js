@@ -632,6 +632,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.tunnelMode === 'string') {
       result.tunnelMode = normalizeTunnelMode(candidate.tunnelMode);
     }
+    if (Number.isInteger(candidate.tunnelHttpsPort) && candidate.tunnelHttpsPort >= 1 && candidate.tunnelHttpsPort <= 65535) {
+      result.tunnelHttpsPort = candidate.tunnelHttpsPort;
+    }
     if (candidate.managedLocalTunnelConfigPath === null) {
       result.managedLocalTunnelConfigPath = null;
     } else if (typeof candidate.managedLocalTunnelConfigPath === 'string') {
@@ -690,6 +693,9 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.walkthroughModelOverride.trim();
       result.walkthroughModelOverride = trimmed.length > 0 ? trimmed : undefined;
     }
+    if (candidate.walkthroughModelVariant !== undefined) {
+      result.walkthroughModelVariant = asNonEmptyString(candidate.walkthroughModelVariant) ?? undefined;
+    }
     for (const key of ['fallbackModel', 'fallbackVariant']) {
       const value = z.string().trim().safeParse(candidate[key]);
       if (value.success) result[key] = value.data.length > 0 ? value.data : undefined;
@@ -739,6 +745,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (candidate.enterToSendConfigured === true || candidate.enterToSendConfigured === false) {
       result.enterToSendConfigured = candidate.enterToSendConfigured;
+    }
+    if (candidate.mobileReturnKeySends === true || candidate.mobileReturnKeySends === false) {
+      result.mobileReturnKeySends = candidate.mobileReturnKeySends;
     }
     if (typeof candidate.showOpenCodeUpdateNotifications === 'boolean') {
       result.showOpenCodeUpdateNotifications = candidate.showOpenCodeUpdateNotifications;

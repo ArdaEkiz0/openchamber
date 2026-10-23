@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { createVSCodeAPIs } from './api';
 import { createRemovalTombstones } from './inlineCommentRemovals';
 import { resolveCommentTarget } from './inlineCommentTarget';
+import { fetchLastAssistantMessageText } from './notificationMessage';
+import { findMessagePageItem } from '@openchamber/ui/lib/opencode/messagePaging';
 import { BridgeRequestError, onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
@@ -19,10 +21,12 @@ import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@openchamber/ui/stores/permissionStore';
 import { permissionPolicyWireSchema, policySnapshotFromWire } from '@openchamber/ui/stores/utils/permissionAutoAccept';
 import { processVSCodePermissionAutoAccept } from '@openchamber/ui/sync/vscode-permission-auto-accept';
-import type { AssistantMessage, Part } from '@openchamber/ui/lib/opencode/model';
+import type { AssistantMessage } from '@openchamber/ui/lib/opencode/model';
 import { syncEventSessionID, type SyncEvent } from '@openchamber/ui/lib/opencode/events';
 import { focusChatInput } from '@openchamber/ui/components/chat/composer/editor/dom';
 import { hostViewerStateSchema, reportHostViewerState } from '@openchamber/ui/lib/surfaceAttention';
+import { vscodeSettingsNavigationSchema } from '@openchamber/ui/lib/settings/vscodeNavigation';
+import { applyVSCodeSettingsNavigation } from '@openchamber/ui/apps/vscodeSettingsNavigation';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 
@@ -42,6 +46,7 @@ declare global {
       platform?: string;
       arch?: string;
       viewMode?: 'sidebar' | 'editor';
+      panelType?: 'chat' | 'settings';
       initialSessionId?: string | null;
       initialComposer?: 'parallel' | null;
     };
@@ -64,6 +69,14 @@ try {
 }
 
 window.__OPENCHAMBER_RUNTIME_APIS__ = createVSCodeAPIs();
+
+const reportSettingsShortcutFocus = () => {
+  postBridgeNotification('webview:settings-focus', { focused: document.hasFocus() });
+};
+window.addEventListener('focus', reportSettingsShortcutFocus);
+window.addEventListener('blur', reportSettingsShortcutFocus);
+document.addEventListener('focusin', reportSettingsShortcutFocus);
+reportSettingsShortcutFocus();
 
 const bootstrapLocale = readStoredLocaleForBootstrap();
 const bootstrapMessages = getBootstrapMessages(bootstrapLocale);
@@ -786,6 +799,18 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  if (pathname === '/api/config/skill-switch' && method === 'PUT') {
+    const body = await extractJsonBody(input, init, method);
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const data = await sendBridgeMessage('api:config/skill-switch', { ...body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   if (pathname === '/api/config/mcp') {
     const verb = method;
     const body = await extractJsonBody(input, init, method);
@@ -887,11 +912,23 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return 200;
   };
 
-  // Skills catalog: /api/config/skills/catalog
+  // Skills catalog: /api/config/skills/catalog lists the sources,
+  // /api/config/skills/catalog/source scans one of them.
   if (pathname === '/api/config/skills/catalog') {
+    try {
+      const data = await sendBridgeMessage('api:config/skills:catalog');
+      return new Response(JSON.stringify(data), { status: skillsCatalogStatusFromPayload(data), headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ ok: false, error: { kind: 'unknown', message } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/config/skills/catalog/source') {
+    const sourceId = url.searchParams.get('sourceId') ?? '';
     const refresh = url.searchParams.get('refresh') === 'true';
     try {
-      const data = await sendBridgeMessage('api:config/skills:catalog', { refresh });
+      const data = await sendBridgeMessage('api:config/skills:catalog/source', { sourceId, refresh });
       return new Response(JSON.stringify(data), { status: skillsCatalogStatusFromPayload(data), headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -970,27 +1007,32 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  if (pathname === '/api/magic-prompts') {
-    if (method === 'GET') {
-      const data = await sendBridgeMessage('api:magic-prompts:get');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    if (method === 'DELETE') {
-      const data = await sendBridgeMessage('api:magic-prompts:reset-all');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  if (pathname.startsWith('/api/magic-prompts/')) {
-    const id = decodeURIComponent(pathname.slice('/api/magic-prompts/'.length));
-    if (method === 'PUT') {
-      const body = await extractJsonBody(input, init, method);
-      const data = await sendBridgeMessage('api:magic-prompts:save', { id, text: body?.text });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    if (method === 'DELETE') {
-      const data = await sendBridgeMessage('api:magic-prompts:reset', { id });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  // Magic Prompts: the extension host answers with the server's statuses and
+  // bodies. Selectors stay in the query string, every value of a name is
+  // forwarded so a repeated one is refused there, and the routing directory
+  // plays no part in which file is read or written; a prompt read names its
+  // directory as `sessionDirectory`.
+  const isMagicPromptCollection = pathname === '/api/magic-prompts' && (method === 'GET' || method === 'DELETE');
+  const isMagicPromptItem = pathname.startsWith('/api/magic-prompts/') && (method === 'PUT' || method === 'DELETE');
+  if (isMagicPromptCollection || isMagicPromptItem) {
+    const readRequest = async () => ({
+      method,
+      id: isMagicPromptItem ? decodeURIComponent(pathname.slice('/api/magic-prompts/'.length)) : null,
+      query: {
+        projectId: url.searchParams.getAll('projectId'),
+        scope: url.searchParams.getAll('scope'),
+        sessionDirectory: url.searchParams.getAll('sessionDirectory'),
+      },
+      body: method === 'GET' ? undefined : await extractJsonBody(input, init, method),
+    });
+    // A malformed id encoding or JSON body is the client's error.
+    const request = await readRequest().catch(() => null);
+    if (!request) return jsonResponse({ error: 'Invalid magic prompt request' }, 400);
+    try {
+      const { status, body } = await sendBridgeMessage<{ status: number; body: unknown }>('api:magic-prompts', request);
+      return jsonResponse(body, status);
+    } catch (error) {
+      return jsonResponse({ error: error instanceof Error ? error.message : 'Magic prompt request failed' }, 500);
     }
   }
 
@@ -1786,10 +1828,9 @@ onCommand('newSession', (payload) => {
   window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'chat' } }));
 });
 
-// Listen for showSettings command from extension title bar button
-onCommand('showSettings', () => {
-  // Dispatch event to navigate to settings view in VSCodeLayout
-  window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'settings' } }));
+onCommand('showSettings', (payload) => {
+  const navigation = vscodeSettingsNavigationSchema.safeParse(payload);
+  if (navigation.success) applyVSCodeSettingsNavigation(navigation.data);
 });
 
 // Run the same full OpenCode reload flow the app uses after an update: shows the
@@ -1891,30 +1932,6 @@ const formatNotificationLabel = (raw: string, fallback: string): string => {
   return raw.split(/[-_\s]+/).filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 };
 
-const extractNotificationTextFromParts = (parts: readonly Part[] | undefined): string => {
-  if (!parts) return '';
-  return parts
-    .map((part) => (part.type === 'text' ? part.text : ''))
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-};
-
-const fetchLastAssistantMessageText = async (sessionId: string, messageId?: string): Promise<string> => {
-  if (!sessionId) return '';
-
-  try {
-    // Newest first: the message we want is at the front, not the back.
-    const page = await opencodeClient.getSessionMessages(sessionId, { limit: 5 });
-    const target = messageId
-      ? page.items.find((item) => item.info.id === messageId && item.info.role === 'assistant')
-      : page.items.find((item) => item.info.role === 'assistant' && item.info.finish === 'stop');
-    return target ? extractNotificationTextFromParts(target.parts) : '';
-  } catch {
-    return '';
-  }
-};
-
 type NotificationTemplateKey = 'completion' | 'subtask' | 'error' | 'question';
 
 // The same defaults the settings page shows as placeholders. An empty field
@@ -2012,16 +2029,22 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
     }
     const requireHidden = settings.notificationMode !== 'always';
     const assistant = notificationAssistantMessage(syncEvent);
-    const errorMessage = syncEvent.type === 'session.error'
-      ? syncEvent.properties.error.message
-      : assistant?.error?.message ?? '';
-    const rawLastMessage = errorMessage || await fetchLastAssistantMessageText(sessionId, assistant?.id);
-    const lastMessage = prepareNotificationLastMessage(rawLastMessage, settings);
-    const variables = buildNotificationVariables(syncEvent, directory, sessionId, lastMessage);
-
     const finish = assistant?.finish;
     const isCompletion = syncEvent.type === 'session.idle' || finish === 'stop';
     const isError = syncEvent.type === 'session.error' || finish === 'error';
+    // Every sync event reaches this listener, streaming deltas included. Only
+    // the completion and error notifications show `{last_message}`, so only
+    // they may walk message pages; any other event reads nothing.
+    const showsLastMessage = isCompletion || isError;
+    if (!showsLastMessage && syncEvent.type !== 'form.created' && syncEvent.type !== 'permission.asked') return;
+    const errorMessage = syncEvent.type === 'session.error'
+      ? syncEvent.properties.error.message
+      : assistant?.error?.message ?? '';
+    const rawLastMessage = showsLastMessage
+      ? errorMessage || await fetchLastAssistantMessageText(findMessagePageItem, sessionId, assistant?.id)
+      : '';
+    const lastMessage = prepareNotificationLastMessage(rawLastMessage, settings);
+    const variables = buildNotificationVariables(syncEvent, directory, sessionId, lastMessage);
 
     if (isCompletion) {
       const session = await opencodeClient.getSession(sessionId, directory).catch(() => undefined);
@@ -2109,7 +2132,8 @@ window.addEventListener('openchamber:vscode-notification-event', (event) => {
 
 // Listen for settings sync command from extension (broadcast to all VS Code webviews)
 onCommand('settingsSynced', () => {
-  import('@openchamber/ui/lib/persistence').then(({ syncDesktopSettings }) => {
+  import('@openchamber/ui/lib/persistence').then(({ invalidateSettingsCache, syncDesktopSettings }) => {
+    invalidateSettingsCache();
     void syncDesktopSettings({ adoptTheme: false });
   });
 });

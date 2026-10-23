@@ -1,4 +1,5 @@
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
+import type { I18nKey, I18nParams } from '@/lib/i18n';
 import { isValidCronExpression } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
 
@@ -141,7 +142,7 @@ export const toDraft = (
   };
 };
 
-export const validateDraft = (draft: ScheduledTaskDraft, t: (key: string, params?: Record<string, string | number>) => string): string | null => {
+export const validateDraft = (draft: ScheduledTaskDraft, t: (key: I18nKey, params?: I18nParams) => string): string | null => {
   if (draft.sessionMode === 'existing' && !draft.targetSessionId) return t('sessions.scheduledTasks.editor.targetRequired');
   if (!draft.name.trim()) {
     return t('sessions.scheduledTasks.editor.validation.taskNameRequired');

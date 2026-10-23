@@ -572,23 +572,31 @@ const PULL_STATUS_LIMIT = REFERENCE_PAGE_SIZE;
 
 /**
  * The PRs a status request names, `owner/repo#number` joined by commas, as
- * summary refs. Null when the list is empty, malformed or longer than a page.
+ * summary refs. A ref may carry `@host` when it lives on a GitHub Enterprise
+ * instance; a missing (or `github.com`) host is the default. Null when the list
+ * is empty, malformed or longer than a page.
  */
 export function readPullStatusRefs(value) {
   const entries = String(value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
   if (entries.length === 0 || entries.length > PULL_STATUS_LIMIT) return null;
   const refs = [];
   for (const entry of entries) {
-    const match = entry.match(/^([^/#\s]+)\/([^/#\s]+)#(\d+)$/);
+    const match = entry.match(/^([^/#\s]+)\/([^/#\s]+)#(\d+)(?:@([^#@\s]+))?$/);
     if (!match) return null;
-    refs.push({ owner: match[1], repo: match[2], number: Number(match[3]) });
+    const ref = { owner: match[1], repo: match[2], number: Number(match[3]) };
+    // A host the ref names, normalized. github.com is the default either way, so
+    // it is left off; only a real enterprise host is carried.
+    const host = match[4]?.trim().toLowerCase();
+    if (host && host !== 'github.com') {
+      ref.host = host;
+    }
+    refs.push(ref);
   }
   return parseSummaryRefs(refs);
 }
 
 const stateSchema = z.enum(['open', 'closed', 'merged', 'all']).catch('open');
 const peopleSchema = z.enum(['any', 'assigned', 'created', 'reviewRequested']).catch('any');
-const kindSchema = z.enum(['issue', 'pull']).nullable().catch(null);
 
 /** A list's state; anything else reads as `open`. */
 export function readReferenceState(value) {
@@ -600,10 +608,6 @@ export function readReferencePeople(value) {
   return peopleSchema.parse(value);
 }
 
-/** `issue` or `pull`; anything else is null. */
-export function readReferenceKind(value) {
-  return kindSchema.parse(value ?? null);
-}
 
 const searchResultSchema = z.object({
   search: z.object({
