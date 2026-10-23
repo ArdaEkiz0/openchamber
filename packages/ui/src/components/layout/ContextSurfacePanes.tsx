@@ -30,7 +30,7 @@ import {
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { clampContextEditorTreeWidth, normalizeContextPanelDirectoryKey, useUIStore, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
-import { setExternallyViewedSession } from '@/sync/sync-context';
+import { setExternallyViewedSession, useSessionDirectory } from '@/sync/sync-context';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 import { getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { MovablePane } from './MovablePane';
@@ -450,10 +450,19 @@ export const ContextSurfacePanes: React.FC = () => {
   const activeChatSessionID = chatActiveTab ? getSessionIDFromDedupeKey(chatActiveTab.dedupeKey) : null;
   // A chat opened from another project (or Chat) carries its own directory;
   // tabs opened without one (subtasks, reviews) belong to this panel's.
+  // Where the chat lives is not the tab's record forever, though: a session
+  // that moves to another worktree mid-turn takes its transcript and live
+  // deltas to the destination store. Cross-store lookup returns the record's
+  // current directory (undefined while the session is unknown), so the pane
+  // follows the move instead of reading a store nothing arrives in anymore.
+  const activeChatSessionRecordDirectory = useSessionDirectory(activeChatSessionID);
   const activeChatDirectory = React.useMemo(() => {
+    const recordDirectory = activeChatSessionRecordDirectory
+      ? normalizeContextPanelDirectoryKey(activeChatSessionRecordDirectory)
+      : '';
     const own = chatActiveTab?.targetDirectory ? normalizeContextPanelDirectoryKey(chatActiveTab.targetDirectory) : '';
-    return own || directoryKey || null;
-  }, [chatActiveTab?.targetDirectory, directoryKey]);
+    return recordDirectory || own || directoryKey || null;
+  }, [activeChatSessionRecordDirectory, chatActiveTab?.targetDirectory, directoryKey]);
   const activeChatPinnedSession = React.useMemo(
     () => (activeChatSessionID ? { sessionId: activeChatSessionID, directory: activeChatDirectory } : null),
     [activeChatSessionID, activeChatDirectory],

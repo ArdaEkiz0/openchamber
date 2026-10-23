@@ -1336,7 +1336,10 @@ step (`session.updated` moves `time.updated`), so always-mounted chrome that
 reads a few fields of either goes through `useSessionSelector` or
 `useSessionMessagesSelector` with an equality for the derived value, never
 `useSession` or `useSessionMessages`. `useSessionDirectory` is one such
-selector. The same holds for a directory's session list: `useSessions`
+selector. Called with no directory, it searches every child store and returns
+the record's current directory — after a `session.moved`, the destination —
+which is how readers that must stay valid across a move (a chat pane opened on
+a session that later moves away) resolve where to read. The same holds for a directory's session list: `useSessions`
 changes on every streamed step, so a reader that needs when sessions started
 uses `useSessionStartTimes`, which changes only when a session is added or
 removed. A list that must ignore sessions another source already holds reads
