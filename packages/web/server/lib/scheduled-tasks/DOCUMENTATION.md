@@ -209,7 +209,11 @@ checkout itself:
   overrides the run's own result.
 - **State.** `state.lastRunIsolated` and `state.lastRunBranch` mirror what the
   last run actually did; the `openchamber:scheduled-task-ran` event payload
-  carries the same `isolated` / `branch` pair.
+  carries the same `isolated` / `branch` pair. The pair is written when the
+  run's session is created, not only when it finishes, so a run that fails or
+  times out after its prompt went out still reports that it ran isolated — as
+  does the event, which the watchdog timeout path emits without a result
+  object.
 
 ## Files
 

@@ -698,14 +698,27 @@ export const createScheduledTasksRuntime = (deps) => {
         // with the worktree here the same way the finished run's teardown
         // removes it.
         await removeTaskWorktree?.({ projectDirectory: projectPath, worktreeDirectory: isolation.directory, deleteLocalBranch: true })
-          .catch(() => {});
+          .catch((removeError) => {
+            // A stranded worktree nobody owns is exactly what cleanup exists
+            // to avoid, so a removal failure here gets the same log line the
+            // finished run's teardown writes, not a silent swallow.
+            logger.warn?.("[ScheduledTasks] failed to clean up the failed run's worktree", {
+              projectID,
+              taskID: task.id,
+              worktree: isolation.directory,
+              error: removeError?.message ?? removeError,
+            });
+          });
       }
       throw error;
     }
 
     try {
       // Before the event, so a UI refreshing on it already sees the session.
-      await onSessionCreated?.(sessionID);
+      // The isolation context travels with it: creation is the earliest place
+      // where "this run got a worktree" is known, so even a run that times out
+      // long after its prompt was sent still records that it ran isolated.
+      await onSessionCreated?.(sessionID, isolation ?? null);
 
       try {
         emitTaskRunEvent?.({
@@ -1039,14 +1052,26 @@ export const createScheduledTasksRuntime = (deps) => {
       let durationMs = 0;
       let errorMessage;
       // Set when the run executed in a worktree it got for itself (#1959).
+      // Known from session creation on, so a run that fails or times out
+      // afterwards still records how it ran.
       let runIsolation = null;
       // Known as soon as the run creates its session, so a run that fails or
       // times out afterwards still points at the session it left behind.
       let createdSessionID;
-      const recordCreatedSession = async (id) => {
+      const recordCreatedSession = async (id, isolation = null) => {
         createdSessionID = id;
+        runIsolation = isolation;
         try {
-          const recorded = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, { lastSessionId: id });
+          const recorded = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, {
+            lastSessionId: id,
+            lastRunIsolated: isolation ? true : undefined,
+            // Same rule as the completion write: only a task that keeps its
+            // worktree records the branch, because only then is the branch
+            // still there for the card to name.
+            lastRunBranch: isolation && task.cleanupWorktree === false && isolation.branch
+              ? String(isolation.branch)
+              : undefined,
+          });
           if (recorded.task) {
             updateInMemoryTask(projectID, recorded.task);
           }
