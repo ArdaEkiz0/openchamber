@@ -2951,7 +2951,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return null;
         }
 
-        const displayVariant = currentVariant ?? t('chat.modelControls.default');
+        // The button carries the effort the same way its menu items spell
+        // them (typed labels like "xhigh" otherwise read as raw ids), while
+        // the no-selection case keeps the translated Default.
+        const displayVariant = currentVariant ? formatEffortLabel(currentVariant) : t('chat.modelControls.default');
         const isDefault = !currentVariant;
         const colorClass = isDefault ? 'text-muted-foreground' : 'text-[color:var(--status-info)]';
         // An effort nobody picked in this composer is this model's configured
