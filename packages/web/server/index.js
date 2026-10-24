@@ -195,8 +195,9 @@ const CLIENT_RELOAD_DELAY_MS = 800;
 const OPEN_CODE_READY_GRACE_MS = 12000;
 // `OPENCHAMBER_PROXY_TIMEOUT_MS` overrides the OpenCode proxy response
 // deadline in milliseconds and `0` removes it; anything else keeps the
-// 4-minute default (resolveProxyRequestTimeoutMs).
-const LONG_REQUEST_TIMEOUT_MS = resolveProxyRequestTimeoutMs(process.env);
+// 4-minute default (resolveProxyRequestTimeoutMs). A value that is set but
+// not a non-negative number is warned once here at startup.
+const LONG_REQUEST_TIMEOUT_MS = resolveProxyRequestTimeoutMs(process.env, console);
 const TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS = 30 * 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;

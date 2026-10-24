@@ -27,6 +27,18 @@ describe('resolveProxyRequestTimeoutMs', () => {
     // A non-string value reads as absent.
     expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: 30000 })).toBe(240000);
   });
+
+  it('warns once when a set value is ignored and says so to the provided logger', () => {
+    const logger = { warn: vi.fn() };
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '4h' }, logger)).toBe(240000);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0][0]).toContain('OPENCHAMBER_PROXY_TIMEOUT_MS="4h"');
+    expect(logger.warn.mock.calls[0][0]).toContain('4-minute default');
+    // Valid values stay quiet, and absence never warns.
+    expect(resolveProxyRequestTimeoutMs({ OPENCHAMBER_PROXY_TIMEOUT_MS: '0' }, logger)).toBe(0);
+    expect(resolveProxyRequestTimeoutMs({}, logger)).toBe(240000);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('isValidOpenCodeHostname', () => {
